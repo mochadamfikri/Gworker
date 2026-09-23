@@ -33,10 +33,12 @@ class PVAPinsClient:
         self.config = config or ProviderConfig()
 
     def _request(self, method: str, path: str, params: dict[str, Any] | None = None,
-                 body: dict[str, Any] | None = None) -> Any:
+                 body: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> Any:
         query = ("?" + urlencode(params)) if params else ""
         url = BASE_URL.rstrip("/") + "/" + path.lstrip("/") + query
         headers = {"X-API-Key": self.api_key, "Accept": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
         data = None
         if body is not None:
             import json
@@ -94,12 +96,12 @@ class PVAPinsClient:
         cfg = self.config
         payload: dict[str, Any] = {
             "country": country or cfg.country, "service": service or cfg.service,
-            "idempotencyKey": "gworker-" + uuid.uuid4().hex
         }
         selected = operator if operator is not None else cfg.operator
         if selected is not None:
             payload["operator"] = selected
-        return dict(self._request("POST", "/orders", body=payload))
+        return dict(self._request("POST", "/orders", body=payload,
+                                  extra_headers={"Idempotency-Key": "gworker-" + uuid.uuid4().hex}))
 
     def order(self, order_id: str) -> dict[str, Any]:
         return dict(self._request("GET", f"/orders/{order_id}"))
