@@ -44,7 +44,7 @@ class PVAPinsClientTests(unittest.TestCase):
             client = PVAPinsClient("secret")
             result = client.reserve("IN", "go", 2)
         self.assertEqual(result["id"], "1")
-        self.assertIn("Idempotency-key", {k.title(): v for k, v in captured["headers"].items()})
+        self.assertIn("Idempotency-Key", {k.title(): v for k, v in captured["headers"].items()})
         self.assertEqual(captured["body"]["operator"], 2)
         self.assertNotIn("idempotencyKey", captured["body"])
 
