@@ -51,14 +51,15 @@ pre{white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:8px}
 <input id="country" value="IN" placeholder="Country ISO">
 <input id="service" value="go" placeholder="Service code/name">
 <input id="operator" type="number" placeholder="Operator">
-<button onclick="reserve()">Reserve</button>
+<button onclick="setConfig()">Set provider</button><button onclick="reserve()">Reserve</button>
 <p>Provider OTP is polled here only as provider data. Parent verification/Google OTP entry remains manual.</p>
 </div>
 <div class="card"><b>API output</b><pre id="out">Ready.</pre></div>
 <script>
 async function get(url){let r=await fetch(url);let t=await r.text();document.querySelector('#out').textContent=t;if(url.includes('/worker/status'))document.querySelector('#status').textContent=t}
 async function post(url,body={}){let r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let t=await r.text();document.querySelector('#out').textContent=t;get('/api/worker/status')}
-async function setConfig(){let op=document.querySelector('#operator').value;await post('/api/provider/config',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}\nasync function reserve(){let op=document.querySelector('#operator').value;await post('/api/provider/reserve',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}
+async function setConfig(){let op=document.querySelector('#operator').value;await post('/api/provider/config',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}
+async function reserve(){let op=document.querySelector('#operator').value;await post('/api/provider/reserve',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}
 setInterval(()=>get('/api/worker/status'),5000);
 </script></body></html>"""
 
