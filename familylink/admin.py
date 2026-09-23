@@ -58,7 +58,7 @@ pre{white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:8px}
 <script>
 async function get(url){let r=await fetch(url);let t=await r.text();document.querySelector('#out').textContent=t;if(url.includes('/worker/status'))document.querySelector('#status').textContent=t}
 async function post(url,body={}){let r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let t=await r.text();document.querySelector('#out').textContent=t;get('/api/worker/status')}
-async function reserve(){let op=document.querySelector('#operator').value;await post('/api/provider/reserve',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}
+async function setConfig(){let op=document.querySelector('#operator').value;await post('/api/provider/config',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}\nasync function reserve(){let op=document.querySelector('#operator').value;await post('/api/provider/reserve',{country:document.querySelector('#country').value,service:document.querySelector('#service').value,operator:op?Number(op):null})}
 setInterval(()=>get('/api/worker/status'),5000);
 </script></body></html>"""
 
@@ -121,6 +121,15 @@ def run_admin(worker: WorkerController, provider: PVAPinsClient | None,
                 if path == "/api/worker/stop":
                     worker.stop()
                     return _json(self, 200, {"stopped": True, "status": worker.status()})
+                if path == "/api/provider/config":
+                    if not provider:
+                        raise PVAPinsError("PVAPins is not configured.")
+                    if data.get("country"):
+                        provider.config.country = str(data["country"])
+                    if data.get("service"):
+                        provider.config.service = str(data["service"])
+                    provider.config.operator = int(data["operator"]) if data.get("operator") is not None else None
+                    return _json(self, 200, {"country": provider.config.country, "service": provider.config.service, "operator": provider.config.operator})
                 if path == "/api/provider/reserve":
                     if not provider:
                         raise PVAPinsError("PVAPins is not configured.")
