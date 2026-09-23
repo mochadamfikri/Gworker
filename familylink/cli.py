@@ -36,6 +36,9 @@ from .redact import mask_email
 from .service import FamilyLinkService
 from .storage.store import Store
 from .workflow import build_handoff
+from .pvapins import PVAPinsClient, ProviderConfig, PVAPinsError
+from .worker import WorkerController
+from .admin import run_admin
 
 app = typer.Typer(
     add_completion=False,
@@ -360,6 +363,47 @@ def simulate_failure(
         )
     )
     store.close()
+
+
+# --------------------------------------------------------------- admin panel
+@app.command("admin")
+def admin(
+    host: Optional[str] = typer.Option(None, "--host", help="Bind address; default 127.0.0.1."),
+    port: Optional[int] = typer.Option(None, "--port", help="HTTP port; default 8787."),
+) -> None:
+    """Run the VPS admin panel and worker controller."""
+    config, store, service, _ = _ctx()
+    key = __import__("os").environ.get("PVAPINS_API_KEY", "").strip()
+    provider = None
+    if key:
+        import os
+        operator = os.environ.get("PVAPINS_OPERATOR")
+        provider = PVAPinsClient(
+            key,
+            ProviderConfig(
+                country=os.environ.get("PVAPINS_COUNTRY", "IN"),
+                service=os.environ.get("PVAPINS_SERVICE", "go"),
+                operator=int(operator) if operator else None,
+            ),
+        )
+    controller = WorkerController(service, provider)
+    try:
+        server = run_admin(controller, provider, host, port)
+    except Exception as exc:
+        store.close()
+        _fail(str(exc))
+    console.print(Panel(
+        f"Admin panel: http://{server.server_address[0]}:{server.server_address[1]}",
+        title="Gworker Admin",
+        border_style="green",
+    ))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        controller.stop()
+    finally:
+        server.server_close()
+        store.close()
 
 
 if __name__ == "__main__":
