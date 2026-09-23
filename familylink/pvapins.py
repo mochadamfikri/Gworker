@@ -33,7 +33,8 @@ class PVAPinsClient:
         self.config = config or ProviderConfig()
 
     def _request(self, method: str, path: str, params: dict[str, Any] | None = None,
-                 body: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> Any:
+                 body: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None,
+                 retries: int = 3) -> Any:
         query = ("?" + urlencode(params)) if params else ""
         url = BASE_URL.rstrip("/") + "/" + path.lstrip("/") + query
         headers = {"X-API-Key": self.api_key, "Accept": "application/json"}
@@ -45,23 +46,43 @@ class PVAPinsClient:
             data = json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
         req = Request(url, data=data, headers=headers, method=method)
-        try:
-            with urlopen(req, timeout=self.config.timeout) as resp:
-                raw = resp.read().decode("utf-8")
-                import json
-                return json.loads(raw) if raw else {}
-        except HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
+
+        for attempt in range(1, max(1, retries) + 1):
             try:
-                import json
-                payload = json.loads(raw)
-            except Exception:
-                payload = raw
-            raise PVAPinsError(f"PVAPins HTTP {exc.code}: {payload}") from exc
-        except (URLError, TimeoutError) as exc:
-            raise PVAPinsError(f"PVAPins connection failed: {exc}") from exc
-        except ValueError as exc:
-            raise PVAPinsError("PVAPins returned invalid JSON.") from exc
+                with urlopen(req, timeout=self.config.timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+                    import json
+                    return json.loads(raw) if raw else {}
+            except HTTPError as exc:
+                raw = exc.read().decode("utf-8", errors="replace")
+                try:
+                    import json
+                    payload = json.loads(raw)
+                except Exception:
+                    payload = raw
+
+                if exc.code in (429, 502, 503) and attempt < retries:
+                    retry_after = exc.headers.get("Retry-After", "")
+                    try:
+                        delay = max(1.0, float(retry_after))
+                    except (TypeError, ValueError):
+                        delay = min(10.0, float(attempt * 2))
+                    time.sleep(delay)
+                    continue
+
+                code = payload.get("error") if isinstance(payload, dict) else None
+                message = payload.get("message") if isinstance(payload, dict) else str(payload)
+                detail = f"{code}: {message}" if code else str(message)
+                raise PVAPinsError(f"PVAPins HTTP {exc.code}: {detail}") from exc
+            except (URLError, TimeoutError) as exc:
+                if attempt < retries:
+                    time.sleep(min(10.0, float(attempt * 2)))
+                    continue
+                raise PVAPinsError(f"PVAPins connection failed: {exc}") from exc
+            except ValueError as exc:
+                raise PVAPinsError("PVAPins returned invalid JSON.") from exc
+
+        raise PVAPinsError("PVAPins request failed after retries.")
 
     def account(self) -> dict[str, Any]:
         return dict(self._request("GET", "/account"))
