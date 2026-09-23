@@ -32,6 +32,7 @@ class WorkerController:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._handled_jobs: set[str] = set()
 
     def start(self) -> bool:
         with self._lock:
@@ -59,7 +60,7 @@ class WorkerController:
         try:
             while not self._stop.is_set():
                 jobs = self.service.store.list_jobs()
-                pending = [j for j in jobs if j.state in {JobState.AWAITING_HUMAN_ACTION, JobState.IN_REVIEW}]
+                pending = [j for j in jobs if j.state in {JobState.AWAITING_HUMAN_ACTION, JobState.IN_REVIEW} and j.id not in self._handled_jobs]
                 if not pending:
                     self.snapshot.phase = "idle"
                     self._stop.wait(2.0)
@@ -79,6 +80,7 @@ class WorkerController:
         handoff = build_handoff(self.service.config, job.operation)
         self.service.store.add_audit("worker.handoff", f"Official handoff prepared: {handoff.url}", job.id)
         self.snapshot.phase = "waiting_human"
+        self._handled_jobs.add(job.id)
 
     def reserve_phone(self, country: str | None = None, service: str | None = None,
                       operator: int | None = None) -> dict[str, Any]:
