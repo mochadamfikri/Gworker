@@ -7,7 +7,7 @@ name = "antwork"
 version = "0.1.0"
 description = "Private browser worker control panel"
 requires-python = ">=3.11"
-dependencies = ["fastapi==0.141.1", "uvicorn[standard]==0.53.0", "playwright==1.63.0", "starlette==1.7.0"]
+dependencies = ["fastapi==0.141.1", "uvicorn[standard]==0.53.0", "playwright==1.63.0", "starlette==1.7.0", "cryptography==50.0.1"]
 
 [project.optional-dependencies]
 test = ["pytest==8.3.5", "pytest-asyncio==0.26.0", "httpx==0.28.1"]

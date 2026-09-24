@@ -13,6 +13,16 @@ class Store:
             id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, email TEXT NOT NULL,
             status TEXT NOT NULL, phase TEXT NOT NULL, created TEXT NOT NULL,
             updated TEXT NOT NULL)""")
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(jobs)")}
+        for name, definition in {
+            "action": "TEXT NOT NULL DEFAULT 'purchase'",
+            "source_id": "TEXT NOT NULL DEFAULT ''",
+            "result": "TEXT NOT NULL DEFAULT ''",
+            "session_status": "TEXT NOT NULL DEFAULT 'not_saved'",
+            "account_status": "TEXT NOT NULL DEFAULT 'unknown'",
+        }.items():
+            if name not in columns:
+                self.db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
         self.db.execute("""UPDATE jobs SET status='interrupted',
             phase='Server restart; periksa hasil terakhir sebelum membuat batch baru'
             WHERE status IN ('queued','running','need_attention')""")
@@ -21,15 +31,23 @@ class Store:
         self.db.commit()
 
     def put(self, job):
-        self.db.execute("INSERT OR REPLACE INTO jobs VALUES (?,?,?,?,?,?,?)", (
+        self.db.execute("""INSERT OR REPLACE INTO jobs
+            (id,batch_id,email,status,phase,created,updated,action,source_id,result,session_status,account_status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
             job.id, job.batch_id, job.email, job.status.value,
             job.phase, job.created, job.updated,
+            job.action, job.source_id, job.result, job.session_status,
+            job.account_status,
         ))
         self.db.commit()
 
     def list(self):
         return [dict(row) for row in self.db.execute(
             "SELECT * FROM jobs ORDER BY created DESC LIMIT 1000")]
+
+    def get(self, job_id):
+        row = self.db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
 
     def close(self):
         self.db.close()

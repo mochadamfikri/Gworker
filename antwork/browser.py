@@ -1,6 +1,7 @@
 """Live browser session. Unknown steps always request operator attention.
 
-No stealth, CAPTCHA bypass, tracing, HAR, video, or persistent login profile.
+No stealth, CAPTCHA bypass, tracing, HAR, video, or persistent browser profile.
+Authentication cookies are encrypted separately by the session vault.
 Screenshots for remote control exist in memory only.
 """
 import asyncio
@@ -12,20 +13,31 @@ from playwright.async_api import async_playwright
 
 class BrowserDriver:
     billing_verified = False
+    email_verified = False
+    retry_verified = False
 
     def __init__(self):
         self.pw = self.browser = self.context = self.page = None
         self.lock = asyncio.Lock()
 
-    async def open(self):
+    async def open(self, saved=None):
         self.pw = await async_playwright().start()
         self.browser = await self.pw.chromium.launch(headless=True)
         self.context = await self.browser.new_context(
             viewport={"width": 1280, "height": 800}, accept_downloads=False,
             service_workers="block",
+            storage_state=saved,
         )
         self.context.set_default_timeout(10000)
         self.page = await self.context.new_page()
+
+    async def maintain(self, job, saved, attention):
+        if job.action != "open_session":
+            raise RuntimeError("This live action has not yet been mapped and verified")
+        await self.open(saved)
+        await self.page.goto("https://platform.claude.com/", wait_until="domcontentloaded")
+        await attention(job, "Sesi tersimpan dibuka; login ulang jika sesi sudah kedaluwarsa")
+        return "session_opened"
 
     async def visible(self, locator):
         return await locator.count() == 1 and await locator.is_visible()

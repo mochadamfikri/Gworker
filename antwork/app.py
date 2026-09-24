@@ -17,6 +17,7 @@ from .browser import BrowserDriver
 from .engine import Engine
 from .models import BatchInput, Control, Login, SavedAddress, Status
 from .store import Store
+from .sessions import SessionVault
 
 STATIC = Path(__file__).parent / "static"
 
@@ -66,7 +67,8 @@ def create_app(settings=None, driver_factory=BrowserDriver):
         if not settings.password_hash:
             raise RuntimeError("Set ANTWORK_PASSWORD_HASH before starting AntWork")
         store = Store(settings.database)
-        app.state.engine = Engine(store, driver_factory, settings.max_concurrency)
+        vault = SessionVault(Path(settings.database).parent / "sessions")
+        app.state.engine = Engine(store, driver_factory, settings.max_concurrency, vault=vault)
         try:
             yield
         finally:
@@ -143,7 +145,9 @@ def create_app(settings=None, driver_factory=BrowserDriver):
         engine = app.state.engine
         return {"jobs": engine.store.list(), "active_batch": engine.batch_id if engine.secrets else None,
                 "concurrency": engine.concurrency, "max_concurrency": settings.max_concurrency,
-                "live_enabled": live_enabled}
+                "live_enabled": live_enabled,
+                "email_check_enabled": getattr(driver_factory, "email_verified", False),
+                "kyc_retry_enabled": getattr(driver_factory, "retry_verified", False)}
 
     @app.get("/api/address")
     async def address():
@@ -178,6 +182,18 @@ def create_app(settings=None, driver_factory=BrowserDriver):
         if job is None:
             raise HTTPException(404, "Sesi worker tidak tersedia")
         return job
+
+    @app.post("/api/jobs/{job_id}/actions/{action}", status_code=202)
+    async def worker_action(job_id: str, action: str):
+        if action == "check_email" and not getattr(driver_factory, "email_verified", False):
+            raise HTTPException(409, "Pemeriksa email Anthropic belum diverifikasi")
+        if action == "retry_kyc" and not getattr(driver_factory, "retry_verified", False):
+            raise HTTPException(409, "Alur kirim ulang Persona belum diverifikasi")
+        try:
+            action_id = app.state.engine.enqueue_action(job_id, action)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"job_id": action_id}
 
     @app.post("/api/jobs/{job_id}/resume")
     async def resume(job_id: str):

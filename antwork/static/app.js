@@ -27,7 +27,7 @@ function render() {
   $('total').textContent = jobs.length;
   $('running').textContent = jobs.filter(j => j.status === 'running').length;
   $('attention').textContent = jobs.filter(j => j.status === 'need_attention').length;
-  $('completed').textContent = jobs.filter(j => j.status === 'completed').length;
+  $('completed').textContent = jobs.filter(j => j.status === 'completed' && (!j.action || j.action === 'purchase')).length;
   $('worker-count').textContent = jobs.length;
   $('release-notice').hidden = state.live_enabled;
   $('cancel-batch').hidden = !state.active_batch;
@@ -42,16 +42,23 @@ function render() {
     const row = document.createElement('tr');
     const account = row.insertCell();
     const email = document.createElement('strong'); email.textContent = job.email;
-    const id = document.createElement('small'); id.textContent = `Worker ${job.id.slice(0,8)}`;
-    account.append(email,id);
+    const actionNames = {purchase:'Pendaftaran & saldo',open_session:'Buka sesi',check_email:'Cek email',retry_kyc:'Retry KYC'};
+    const id = document.createElement('small'); id.textContent = `${actionNames[job.action] || 'Worker'} · ${job.id.slice(0,8)}`;
+    const session = document.createElement('small');
+    session.textContent = job.session_status === 'saved' ? 'Sesi tersimpan' : job.session_status === 'save_failed' ? 'Sesi gagal disimpan' : 'Belum ada sesi tersimpan';
+    session.className = 'session-note';
+    account.append(email,id,session);
     const badge = document.createElement('span'); badge.className = `status ${job.status}`; badge.textContent = statuses[job.status] || job.status;
     row.insertCell().append(badge);
-    row.insertCell().textContent = job.phase;
+    const phaseCell = row.insertCell(); phaseCell.textContent = job.phase;
+    const accountLabels = {suspended:'Akun: suspend terdeteksi',no_suspend_detected:'Akun: belum terdeteksi suspend',verification_required:'Akun: perlu verifikasi',needs_review:'Akun: perlu diperiksa'};
+    if(accountLabels[job.account_status]) { const accountStatus=document.createElement('strong'); accountStatus.textContent=accountLabels[job.account_status]; accountStatus.className=job.account_status==='suspended'?'suspended-note':'account-note'; phaseCell.append(accountStatus); }
     const actions = row.insertCell();
     function button(text, action, className = 'secondary') {
       const b = document.createElement('button'); b.textContent = text; b.className = className;
       b.onclick = async () => { b.disabled = true; try { await action(); } catch(e) { toast(e.message); } finally { b.disabled = false; } };
       actions.append(b);
+      return b;
     }
     if (job.status === 'need_attention') {
       button('Buka browser', () => openBrowser(job));
@@ -62,6 +69,16 @@ function render() {
         await post(`/jobs/${job.id}/cancel`); await refresh();
       }
     }, 'danger-text');
+    if (terminal.has(job.status) && job.action === 'purchase' && job.session_status === 'saved') {
+      const queueAction = async action => { await post(`/jobs/${job.id}/actions/${action}`); await refresh(); };
+      button('Buka sesi', () => queueAction('open_session'));
+      const check = button('Cek email', () => queueAction('check_email'));
+      check.disabled = !state.email_check_enabled;
+      if(check.disabled) check.title = 'Pemeriksa email belum diverifikasi';
+      const retry = button('Retry KYC', async () => { if(confirm('Kirim ulang link verifikasi Persona untuk akun ini? Pembayaran tidak diulang.')) await queueAction('retry_kyc'); });
+      retry.disabled = !state.kyc_retry_enabled;
+      if(retry.disabled) retry.title = 'Alur kirim ulang Persona belum diverifikasi';
+    }
     return row;
   }));
   $('empty').hidden = visible.length > 0;
