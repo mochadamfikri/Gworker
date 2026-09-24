@@ -162,3 +162,44 @@ async def test_check_topup_dialog_uses_linked_card_without_collecting_cvv():
         assert set(submitted[0]) == {"request_id","amount_usd","limit_usd"}
         assert submitted[0]["amount_usd"] == "5.00"
         await browser.close()
+
+
+async def test_worker_runs_google_then_checkout_and_saves_without_claiming_payment(payload):
+    from antwork.engine import Job
+    from antwork.models import BatchInput
+    batch = BatchInput(**payload)
+    driver = BrowserDriver()
+    original_open = driver.open
+    seen = []
+    async def open_fixture(saved=None):
+        await original_open(saved)
+        async def route(route):
+            url = route.request.url
+            if url == 'https://platform.claude.com/':
+                body = '<button onclick="location.href=\'https://accounts.google.com/login\'">Continue with Google</button>'
+            elif url.endswith('/login'):
+                body = '<input type="email"><button id="identifierNext" onclick="location.href=\'/password\'">Next</button>'
+            elif url.endswith('/password'):
+                body = '<input type="password"><button id="passwordNext" onclick="location.href=\'https://platform.claude.com/dashboard\'">Next</button>'
+            elif 'stripe.com' in url:
+                body = '<input autocomplete="cc-number"><input autocomplete="cc-exp"><input autocomplete="cc-csc">'
+            else:
+                body = '<label>Nama lengkap<input></label><label>Kota<input></label><label>Jumlah kredit<input></label><iframe src="https://js.stripe.com/payment"></iframe><button onclick="document.body.dataset.charged=\'yes\'">Beli kredit</button>'
+            await route.fulfill(content_type='text/html', body=body)
+        await driver.context.route('**/*',route)
+    driver.open = open_fixture
+    async def attention(job, message):
+        seen.append(message)
+        assert driver.page.url == 'https://platform.claude.com/dashboard'
+        assert await driver.page.get_by_label('Nama lengkap').input_value() == 'Test Person'
+        assert await driver.page.get_by_label('Jumlah kredit').input_value() == '5.00'
+        stripe = driver.page.frames[1]
+        assert await stripe.locator('[autocomplete="cc-number"]').input_value() == '4242424242424242'
+        assert await driver.page.locator('body').get_attribute('data-charged') is None
+        job.finish_requested = True
+    try:
+        outcome = await driver.run(Job('one','batch','test0@example.com'),batch.accounts[0],batch,attention)
+        assert outcome == 'session_saved_unverified'
+        assert len(seen) == 1
+    finally:
+        await driver.close()

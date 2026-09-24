@@ -117,45 +117,117 @@ class BrowserDriver:
     async def run(self, job, account, batch, attention):
         await self.open()
         await self.page.goto("https://platform.claude.com/", wait_until="domcontentloaded")
-        google = self.page.get_by_role("button", name="Continue with Google", exact=True)
-        if await self.visible(google):
-            await google.click()
-        else:
-            await attention(job, "Buka Continue with Google pada halaman resmi")
-
-        email_sent = password_sent = False
-        while True:
+        email_sent = password_sent = google_clicked = False
+        while not job.finish_requested:
             pages = [p for p in self.context.pages if not p.is_closed()]
-            if pages:
+            if not pages:
+                raise RuntimeError("Browser closed")
+            if self.page.is_closed():
                 self.page = pages[-1]
+            # OAuth can open a popup. Prefer it until Google returns to Claude.
+            google_pages = [p for p in pages if urlparse(p.url).hostname == "accounts.google.com"]
+            if google_pages:
+                self.page = google_pages[-1]
             host = urlparse(self.page.url).hostname
-            if host == "accounts.google.com":
-                email = self.page.locator('input[type="email"]')
-                password = self.page.locator('input[type="password"]')
-                if not email_sent and await self.visible(email):
-                    await email.fill(account.email)
-                    await self.page.locator("#identifierNext").click()
-                    email_sent = True
-                    await asyncio.sleep(1)
+            try:
+                if host == "accounts.google.com":
+                    email = self.page.locator('input[type="email"]')
+                    password = self.page.locator('input[type="password"]')
+                    if not email_sent and await self.visible(email):
+                        await email.fill(account.email)
+                        email_sent = True
+                        await self.page.locator("#identifierNext").click()
+                        await asyncio.sleep(2)
+                        continue
+                    if not password_sent and await self.visible(password):
+                        await password.fill(account.password.get_secret_value())
+                        password_sent = True
+                        await self.page.locator("#passwordNext").click()
+                        await asyncio.sleep(2)
+                        continue
+                    await attention(job, "Login Google perlu tindakan: buka browser, selesaikan login, tutup kontrol lalu Lanjutkan")
                     continue
-                if not password_sent and await self.visible(password):
-                    await password.fill(account.password.get_secret_value())
-                    await self.page.locator("#passwordNext").click()
-                    password_sent = True
-                    await asyncio.sleep(1)
+                if host in {"platform.claude.com", "console.anthropic.com"}:
+                    google = self.page.get_by_role("button", name=re.compile(r"^(Continue with Google|Lanjutkan dengan Google)$", re.I))
+                    if not google_clicked and await self.visible(google):
+                        google_clicked = True
+                        await google.click()
+                        await asyncio.sleep(2)
+                        continue
+                    if await self.handle_organization_picker():
+                        await asyncio.sleep(1)
+                        continue
+                    kind = await self.inspect_state()
+                    if kind not in {PageKind.unknown, PageKind.organization_picker}:
+                        await attention(job, ATTENTION_MESSAGES.get(kind, ATTENTION_MESSAGES[PageKind.unknown]))
+                        continue
+                    # Only public, uniquely labelled fields on the official page
+                    # or its Stripe frames are populated. Never submit a charge.
+                    count = await self.fill_identity(batch.identity)
+                    count += await self.fill_amount(batch.amount_usd)
+                    card_ready = await self.fill_card(batch.card)
+                    limit = batch.total_limit_usd / len(batch.accounts)
+                    message = (f"Target kredit USD {batch.amount_usd}; batas per akun USD {limit:.2f}. "
+                               "Periksa ringkasan tagihan. Pembelian belum dikirim otomatis. "
+                               "Buka browser untuk tahap berikutnya; Simpan & tutup sesi setelah selesai.")
+                    if count or card_ready:
+                        message = "Kolom yang dikenali sudah diisi. " + message
+                    await attention(job, message)
                     continue
-            if host in {"platform.claude.com", "console.anthropic.com"} and password_sent:
-                break
-            await attention(job, "Login Google memerlukan tindakan; buka browser worker")
+                await self.attend_current_page(job, attention)
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                raise
+            except Exception:
+                # Don't leak DOM, URLs or values from Playwright exceptions.
+                await attention(job, "Langkah otomatis belum berhasil; buka browser untuk melanjutkan manual")
+        return "session_saved_unverified"
 
-        # Billing/onboarding varies per organization. Until a verified adapter is
-        # available, never guess a checkout button or claim payment completion.
-        await self.handle_organization_picker()
-        await self.attend_current_page(job, attention)
-        await self.fill_card(batch.card)
-        await self.attend_current_page(job, attention)
-        # Explicitly stop rather than manufacture success from a generic page.
-        raise RuntimeError("Live billing success detection is not configured")
+    async def fill_identity(self, identity):
+        fields = {
+            "full_name": r"^(Full name|Name|Nama lengkap|Nama)$",
+            "organization": r"^(Organization(?: name)?|Company(?: name)?|Nama organisasi|Organisasi)$",
+            "address": r"^(Address line 1|Street address|Baris alamat 1|Alamat)$",
+            "city": r"^(City|Kota)$",
+            "region": r"^(State|Province|Region|Provinsi|Wilayah)$",
+            "postal_code": r"^(ZIP(?: code)?|Postal code|Kode pos)$",
+            "country": r"^(Country(?: or region)?|Negara(?: atau wilayah)?)$",
+        }
+        filled = 0
+        for frame in self.page.frames:
+            host = urlparse(frame.url).hostname or ""
+            if urlparse(frame.url).scheme != "https" or not (
+                host in {"platform.claude.com", "console.anthropic.com", "stripe.com"} or host.endswith(".stripe.com")
+            ):
+                continue
+            for field, pattern in fields.items():
+                locator = frame.get_by_label(re.compile(pattern, re.I))
+                if not await self.visible(locator) or not await locator.is_enabled():
+                    continue
+                tag = await locator.evaluate("el => el.tagName.toLowerCase()")
+                value = getattr(identity, field)
+                value = value if isinstance(value, str) else value.get_secret_value()
+                if not value:
+                    continue
+                if tag == "select":
+                    # Custom country widgets must be selected by the operator.
+                    if await locator.locator("option").evaluate_all("(opts,v) => opts.some(o => o.value === v)", value):
+                        await locator.select_option(value=value)
+                        filled += 1
+                elif tag in {"input", "textarea"} and await locator.is_editable():
+                    await locator.fill(value)
+                    filled += 1
+        return filled
+
+    async def fill_amount(self, amount):
+        # Screenshots do not show the amount selector. Populate only a uniquely
+        # labelled amount field; unknown controls remain available to the admin.
+        locator = self.page.get_by_label(re.compile(r"^(Credit amount|Amount in USD|Jumlah kredit|Nominal kredit)$", re.I))
+        if await self.visible(locator) and await locator.is_editable():
+            await locator.fill(str(amount))
+            return 1
+        return 0
 
     async def fill_card(self, card):
         """Only fill uniquely identified fields on the payment provider's origin."""
@@ -168,6 +240,9 @@ class BrowserDriver:
             "cvv": 'input[autocomplete="cc-csc"]',
         }
         for page in self.context.pages:
+            owner = urlparse(page.url)
+            if owner.scheme != "https" or owner.hostname not in {"platform.claude.com", "console.anthropic.com"}:
+                continue
             for frame in page.frames:
                 host = urlparse(frame.url).hostname or ""
                 if host != "stripe.com" and not host.endswith(".stripe.com"):
@@ -177,10 +252,11 @@ class BrowserDriver:
                     if await self.visible(locator):
                         matches[field].append(locator)
         if not all(len(locators) == 1 for locators in matches.values()):
-            raise RuntimeError("Payment fields not unambiguous")
+            return False
         await matches["number"][0].fill(card.number.get_secret_value())
         await matches["expiry"][0].fill(card.expiry)
         await matches["cvv"][0].fill(card.cvv.get_secret_value())
+        return True
 
     async def frame(self):
         async with self.lock:

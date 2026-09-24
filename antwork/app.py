@@ -29,6 +29,7 @@ class Settings:
     database: str = "var/antwork.db"
     max_concurrency: int = 5
     live_enabled: bool = False
+    workers_enabled: bool = False
     session_seconds: int = 3600
 
     @classmethod
@@ -39,6 +40,7 @@ class Settings:
             database=os.environ.get("ANTWORK_DATABASE", "var/antwork.db"),
             max_concurrency=int(os.environ.get("ANTWORK_MAX_CONCURRENCY", "5")),
             live_enabled=os.environ.get("ANTWORK_LIVE_ENABLED") == "1",
+            workers_enabled=os.environ.get("ANTWORK_WORKERS_ENABLED") == "1",
         )
 
 
@@ -145,7 +147,7 @@ def create_app(settings=None, driver_factory=BrowserDriver):
         engine = app.state.engine
         return {"jobs": engine.store.list(), "active_batch": engine.batch_id if engine.secrets else None,
                 "concurrency": engine.concurrency, "max_concurrency": settings.max_concurrency,
-                "live_enabled": live_enabled,
+                "live_enabled": live_enabled, "workers_enabled": settings.workers_enabled or live_enabled,
                 "email_check_enabled": getattr(driver_factory, "email_verified", False),
                 "account_check_enabled": True,
                 "saved_card_topup_enabled": settings.live_enabled and getattr(driver_factory, "saved_card_verified", False),
@@ -162,8 +164,8 @@ def create_app(settings=None, driver_factory=BrowserDriver):
 
     @app.post("/api/batches", status_code=201)
     async def batch(body: BatchInput):
-        if not live_enabled:
-            raise HTTPException(409, "Integrasi pembayaran belum diverifikasi; batch live belum diaktifkan")
+        if not (settings.workers_enabled or live_enabled):
+            raise HTTPException(409, "Worker belum diaktifkan")
         try:
             batch_id = app.state.engine.start(body)
         except ValueError as exc:
@@ -219,6 +221,15 @@ def create_app(settings=None, driver_factory=BrowserDriver):
         get_job(job_id)
         try:
             app.state.engine.continue_job(job_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/finish")
+    async def finish(job_id: str):
+        get_job(job_id)
+        try:
+            app.state.engine.finish_job(job_id)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return {"ok": True}

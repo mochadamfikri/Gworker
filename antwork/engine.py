@@ -30,6 +30,7 @@ class Job:
     browser: object = field(default=None, repr=False)
     task: object = field(default=None, repr=False)
     controller: bool = False
+    finish_requested: bool = field(default=False, repr=False)
 
 
 class Engine:
@@ -148,8 +149,11 @@ class Engine:
                 checkpoint = asyncio.create_task(self.periodic_checkpoint(job))
             if job.action == "purchase":
                 account = next(a for a in self.secrets.accounts if a.email == job.email)
-                await driver.run(job, account, self.secrets, self.attention)
-                self.update(job, Status.completed, "Pembelian saldo terkonfirmasi")
+                outcome = await driver.run(job, account, self.secrets, self.attention)
+                if outcome not in {"payment_confirmed", "session_saved_unverified"}:
+                    raise ValueError("Worker did not provide a verified outcome")
+                job.result = outcome
+                self.update(job, Status.completed, "Pembelian saldo terkonfirmasi" if outcome == "payment_confirmed" else "Sesi ditutup admin; pembayaran belum terverifikasi")
             else:
                 saved = self.vault.load(job.source_id, job.email)
                 if not saved:
@@ -255,6 +259,13 @@ class Engine:
         job = self.jobs[job_id]
         if job.status != Status.attention or job.controller:
             raise ValueError("Tutup kontrol browser sebelum melanjutkan")
+        job.resume.set()
+
+    def finish_job(self, job_id):
+        job = self.jobs[job_id]
+        if job.action != "purchase" or job.status != Status.attention or job.controller:
+            raise ValueError("Tutup kontrol browser; simpan sesi tersedia saat worker Need attention")
+        job.finish_requested = True
         job.resume.set()
 
     async def cancel(self, job_id):

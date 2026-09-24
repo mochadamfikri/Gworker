@@ -50,3 +50,13 @@ classified as suspension. Stored-card checkout requires no new card number/CVV.
 Until those are verified, billing and email extraction capabilities
 remain disabled. Recognition is locale-aware for the observed Indonesian/English
 texts and independent of viewport coordinates. Unknown variants request attention.
+
+## Additional checkout references
+
+Five additional screenshots show: billing address and card inputs; Usage credits,
+Estimated tax and Total charge with a Buy credits button; a purchase confirmation
+processing overlay; a quick identity check popup; and dashboard credit balances.
+Indonesian labels are supported for uniquely identified form fields and recognition.
+A processing overlay and a positive balance alone are not a receipt for this job.
+No account names, addresses, card values or verification tokens from the images
+are embedded in the implementation. Live transaction submission remains gated.

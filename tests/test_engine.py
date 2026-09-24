@@ -21,6 +21,7 @@ class Driver:
     async def run(self, job, account, batch, attention):
         self.tracker.add(job.id)
         await attention(job, "KYC / 3DS requires review")
+        return "payment_confirmed"
 
     async def close(self):
         pass
@@ -57,7 +58,7 @@ async def test_concurrency_attention_and_cleanup(store, payload):
 
 async def test_all_success_releases_batch(store, payload):
     class Immediate:
-        async def run(self, *args): pass
+        async def run(self, *args): return "payment_confirmed"
         async def close(self): pass
     engine = Engine(store, Immediate)
     engine.start(BatchInput(**payload))
@@ -130,3 +131,35 @@ def test_restart_interrupts_work_without_replay(tmp_path):
     store = Store(path)
     assert store.list()[0]["status"] == "interrupted"
     store.close()
+
+
+async def test_operator_finish_is_not_payment_success(store, payload):
+    class Assisted:
+        async def run(self, job, account, batch, attention):
+            await attention(job, 'Checkout needs operator')
+            assert job.finish_requested
+            return 'session_saved_unverified'
+        async def close(self): pass
+    engine = Engine(store, Assisted)
+    engine.start(BatchInput(**payload))
+    await until(lambda: any(j.status == Status.attention for j in engine.jobs.values()))
+    job = next(j for j in engine.jobs.values() if j.status == Status.attention)
+    job.controller = True
+    with pytest.raises(ValueError):
+        engine.finish_job(job.id)
+    job.controller = False
+    engine.finish_job(job.id)
+    await until(lambda: job.status == Status.completed)
+    assert job.result == 'session_saved_unverified'
+    assert 'belum terverifikasi' in job.phase
+    await engine.close()
+
+
+async def test_missing_driver_outcome_never_counts_as_payment(store, payload):
+    class Missing:
+        async def run(self, *args): return None
+        async def close(self): pass
+    engine = Engine(store, Missing)
+    engine.start(BatchInput(**payload))
+    await until(lambda: engine.secrets is None)
+    assert all(j.status == Status.failed for j in engine.jobs.values())

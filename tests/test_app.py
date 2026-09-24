@@ -93,3 +93,20 @@ def test_saved_card_checkout_is_gated_until_verified(client):
     })
     assert response.status_code == 409
     assert not client.get("/api/state").json()["jobs"]
+
+
+def test_workers_can_start_while_automatic_payment_remains_disabled(tmp_path, payload):
+    class Driver:
+        billing_verified = False
+        async def run(self, job, account, batch, attention):
+            await attention(job, 'Manual checkout required')
+            return 'session_saved_unverified'
+        async def close(self): pass
+    settings = Settings(hash_password('admin-test-password'),database=str(tmp_path/'workers.db'),workers_enabled=True)
+    with TestClient(create_app(settings, Driver)) as client:
+        headers = login(client)
+        state = client.get('/api/state').json()
+        assert state['workers_enabled'] and not state['live_enabled']
+        assert not state['saved_card_topup_enabled']
+        assert client.post('/api/batches',json=payload,headers=headers).status_code == 201
+        assert len(client.get('/api/state').json()['jobs']) == 4

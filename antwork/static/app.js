@@ -27,7 +27,7 @@ function render() {
   $('total').textContent = jobs.length;
   $('running').textContent = jobs.filter(j => j.status === 'running').length;
   $('attention').textContent = jobs.filter(j => j.status === 'need_attention').length;
-  $('completed').textContent = jobs.filter(j => j.status === 'completed' && (!j.action || j.action === 'purchase' || j.result === 'payment_confirmed')).length;
+  $('completed').textContent = jobs.filter(j => j.status === 'completed' && j.result === 'payment_confirmed').length;
   $('worker-count').textContent = jobs.length;
   $('release-notice').hidden = state.live_enabled;
   $('cancel-batch').hidden = !state.active_batch;
@@ -63,6 +63,7 @@ function render() {
     if (job.status === 'need_attention') {
       button('Buka browser', () => openBrowser(job));
       button('Retry', async () => { await post(`/jobs/${job.id}/actions/refresh_session`); await refresh(); });
+      if(job.action === 'purchase') button('Simpan & tutup sesi', async () => { await post(`/jobs/${job.id}/finish`); await refresh(); });
       button('Lanjutkan', async () => { await post(`/jobs/${job.id}/resume`); await refresh(); });
     }
     if (!terminal.has(job.status)) button('Batalkan', async () => {
@@ -95,7 +96,7 @@ $('login-form').onsubmit = async e => {
   catch(error) { $('login-error').textContent = error.message; }
 };
 $('logout').onclick = async () => { try { await post('/logout'); } finally { showLogin(); } };
-async function newBatch() { requestId = crypto.randomUUID(); $('batch-error').textContent = ''; $('start').disabled = !state.live_enabled || !!state.active_batch; $('batch-dialog').showModal(); updateStart(); try { const data = await api('/address'); if(data.address) for(const [key,value] of Object.entries(data.address)) $(key.replace('_','-')).value = value; } catch(e) { $('batch-error').textContent=e.message; } updateStart(); }
+async function newBatch() { requestId = crypto.randomUUID(); $('batch-error').textContent = ''; $('start').disabled = !(state.workers_enabled ?? state.live_enabled) || !!state.active_batch; $('batch-dialog').showModal(); updateStart(); try { const data = await api('/address'); if(data.address) for(const [key,value] of Object.entries(data.address)) $(key.replace('_','-')).value = value; } catch(e) { $('batch-error').textContent=e.message; } updateStart(); }
 $('new-batch').onclick = newBatch; $('empty-new').onclick = newBatch;
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => $(b.dataset.close).close());
 document.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => {
@@ -129,7 +130,7 @@ $('batch-form').onsubmit = async e => {
     await post('/batches',payload);
     $('batch-form').reset(); $('batch-dialog').close(); await refresh(); toast('Batch dibuat. Worker mulai sesuai concurrency.');
   } catch(error) { $('batch-error').textContent=error.message; }
-  finally { submitting = false; $('start').disabled = !state.live_enabled || !!state.active_batch; }
+  finally { submitting = false; $('start').disabled = !(state.workers_enabled ?? state.live_enabled) || !!state.active_batch; }
 };
 $('concurrency').onchange = async e => { try { await post(`/concurrency/${e.target.value}`); await refresh(); } catch(error){toast(error.message);} };
 $('cancel-batch').onclick = async () => {
@@ -178,7 +179,7 @@ setInterval(()=>{if(!$('workspace').hidden)refresh().catch(e=>toast(e.message));
 
 $('save-address').onclick = async () => { const address = {}; for(const key of ['address','city','region','postal_code','country']) address[key]=$(key.replace('_','-')).value; address.country=address.country.toUpperCase(); try { await api('/address',{method:'PUT',body:JSON.stringify(address)}); $('batch-error').textContent='Alamat tersimpan.'; } catch(e) { $('batch-error').textContent=e.message; } };
 
-function updateStart() { let valid = false; try { const list=accounts(); valid=list.length>0 && list.length<=100 && new Set(list.map(a=>a.email.toLowerCase())).size===list.length && Math.round(Number($('amount').value)*100)*list.length<=Math.round(Number($('total-limit').value)*100); } catch(_) {} $('start').disabled=submitting || !state.live_enabled || !!state.active_batch || !$('batch-form').checkValidity() || !valid; }
+function updateStart() { let valid = false; try { const list=accounts(); valid=list.length>0 && list.length<=100 && new Set(list.map(a=>a.email.toLowerCase())).size===list.length && Math.round(Number($('amount').value)*100)*list.length<=Math.round(Number($('total-limit').value)*100); } catch(_) {} $('start').disabled=submitting || !(state.workers_enabled ?? state.live_enabled) || !!state.active_batch || !$('batch-form').checkValidity() || !valid; }
 $('batch-form').addEventListener('input',updateStart);
 $('batch-form').addEventListener('change',updateStart);
 

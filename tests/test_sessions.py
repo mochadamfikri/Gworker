@@ -85,6 +85,7 @@ class Driver:
 
     async def run(self, job, account, batch, attention):
         self.context = Context()
+        return "session_saved_unverified"
 
     async def maintain(self, job, saved, attention):
         type(self).restored.append(saved)

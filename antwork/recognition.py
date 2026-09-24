@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 class PageKind(StrEnum):
     unknown = "unknown"
     organization_picker = "organization_picker"
+    identity_check = "identity_check"
+    payment_processing = "payment_processing"
     bank_otp = "bank_otp"
     bank_app = "bank_app"
     persona_device = "persona_device"
@@ -24,6 +26,8 @@ class PageKind(StrEnum):
 
 
 ATTENTION_MESSAGES = {
+    PageKind.identity_check: "Claude meminta pemeriksaan identitas; buka browser dan mulai verifikasi resmi",
+    PageKind.payment_processing: "Pembelian sedang dikonfirmasi; tunggu hasil lalu Lanjutkan. Jangan ulangi pembayaran",
     PageKind.bank_otp: "3DS meminta kode autentikasi dari bank; buka browser worker",
     PageKind.bank_app: "3DS meminta persetujuan di aplikasi bank pada HP",
     PageKind.persona_device: "Persona: lanjutkan di HP melalui QR atau Send Email",
@@ -65,6 +69,10 @@ def recognize(url, text, *, owner_url=None):
             return PageKind.persona_country
     claude_hosts = {"platform.claude.com", "console.anthropic.com"}
     if host in claude_hosts:
+        if "pemeriksaan identitas cepat" in content or "quick identity check" in content:
+            return PageKind.identity_check
+        if "mengonfirmasi pembelian anda" in content or "confirming your purchase" in content:
+            return PageKind.payment_processing
         if ("bergabung dengan tim anda" in content and "buat organisasi baru" in content) or (
             "join your team" in content and "create" in content and "organization" in content
         ):
@@ -103,7 +111,7 @@ def recognize_account(url, text):
     # login form or the address bar saying /dashboard.
     signed_in = any(marker in content for marker in ("log out", "sign out", "keluar"))
     dashboard = any(marker in content for marker in ("api keys", "kunci api", "billing", "penagihan"))
-    if parsed.path.rstrip("/") == "/dashboard" and signed_in and dashboard:
+    if parsed.path.rstrip("/") == "/dashboard" and dashboard and (signed_in or (any(m in content for m in ("organization credits", "kredit organisasi")) and any(m in content for m in ("add funds", "tambah dana")))):
         return "ready_for_topup"
     return "unknown"
 

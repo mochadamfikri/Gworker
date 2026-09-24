@@ -7,21 +7,22 @@ Private admin panel for isolated browser workers. Rebuild of Gworker.
 The panel, account import, concurrency scheduler, authentication, ephemeral batch
 secrets, encrypted per-worker login sessions, interruption handling, and interactive
 browser control are implemented. Session cookies can be restored after restart.
-Email extraction and card checkout remain gated until their live flows have been
-mapped and verified. Retry refreshes only the selected worker page. Cek opens the
-Claude dashboard and can queue an explicitly authorized top-up on the linked card.
-**Automatic signup and credit purchases remain disabled pending live verification.**
-The authenticated forms, checkout total, KYC/3DS detection, and reliable purchase
-confirmation still need to be mapped against an authorized test account. The
-current browser adapter is a commissioning draft, not a working payment adapter.
-`ANTWORK_LIVE_ENABLED` defaults to `0`; do not enable it to perform transactions.
-Passing CI verifies local fixtures only, not Google login acceptance or live billing.
+`ANTWORK_WORKERS_ENABLED=1` enables real browser workers independently of
+payment automation. Workers attempt Google login, fill uniquely identified identity,
+amount and Stripe card fields, then pause for operator attention. Google MFA,
+KYC and 3DS stay under operator control. Unknown controls also require attention.
+The operator can save and close the session; this records `session_saved_unverified`,
+never a confirmed payment. Original credentials and card fields remain ephemeral.
 
-Nine mobile screenshots have now been mapped into independent page recognizers
-for organization choice, bank OTP/app approval, and Persona camera/device/expiry/
-completion branches. See [the reference map](docs/reference-flow.md). Recognition
-uses page and iframe text with origin checks, not fixed screen coordinates. These
-clues are tested in mobile and desktop fixtures; the live integration gates remain.
+**Automatic purchase submission and linked-card checkout remain disabled.**
+`ANTWORK_LIVE_ENABLED=0` must remain in place. Screenshot references now include
+billing labels, total charges, the purchase-processing overlay, identity checks,
+and a funded dashboard. These establish the visual flow but do not verify the
+live DOM, amount selector, payment method selection or transaction receipt.
+Passing CI verifies local fixtures, not Google login acceptance or live billing.
+
+Retry refreshes the selected worker only. Cek checks the saved dashboard session;
+linked-card top-up and live mailbox extraction remain gated.
 
 ## Backup
 
