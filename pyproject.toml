@@ -1,29 +1,24 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "familylink-worker"
-version = "1.0.0"
-description = "Hardened, human-in-the-loop Termux assistant for authorized Google Family Link actions."
+name = "antwork"
+version = "0.1.0"
+description = "Private browser worker control panel"
 requires-python = ">=3.11"
-dependencies = [
-    "typer>=0.9.0",
-    "rich>=13.0.0",
-    "httpx>=0.27.0",
-    "pydantic>=2.6.0",
-    "cryptography>=42.0.0",
-]
-
-[project.scripts]
-familylink = "familylink.cli:app"
+dependencies = ["fastapi==0.141.1", "uvicorn[standard]==0.53.0", "playwright==1.63.0", "starlette==1.7.0", "cryptography==50.0.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0.0"]
+test = ["pytest==8.3.5", "pytest-asyncio==0.26.0", "httpx==0.28.1"]
 
 [tool.setuptools.packages.find]
-include = ["familylink*"]
+include = ["antwork*"]
+
+[tool.setuptools.package-data]
+antwork = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

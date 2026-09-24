@@ -1,45 +1,15 @@
-"""Shared pytest fixtures."""
-
-from __future__ import annotations
-
-from pathlib import Path
-
 import pytest
-
-from familylink.config import Config
-from familylink.crypto import SecretBox
-from familylink.models import fingerprint
-from familylink.service import FamilyLinkService
-from familylink.storage.store import Store
+from uuid import uuid4
 
 
-@pytest.fixture()
-def config(tmp_path: Path) -> Config:
-    return Config(
-        home=tmp_path,
-        max_family_members=3,
-        max_pending_jobs=2,
-        max_attempts=3,
-        backoff_base_seconds=1.0,
-        backoff_cap_seconds=10.0,
-        total_time_window_seconds=3600,
-    )
-
-
-@pytest.fixture()
-def store(config: Config) -> Store:
-    s = Store(config.db_path)
-    yield s
-    s.close()
-
-
-@pytest.fixture()
-def service(store: Store, config: Config) -> FamilyLinkService:
-    return FamilyLinkService(store, config)
-
-
-@pytest.fixture()
-def family_head(store: Store, config: Config):
-    box = SecretBox(config.key_path)
-    ident = "guardian@example.com"
-    return store.add_family_head(box.encrypt(ident), fingerprint(ident), "Test Household")
+@pytest.fixture
+def payload():
+    return {
+        "request_id": str(uuid4()),
+        "accounts": [{"email": f"test{i}@example.com", "password": "test:password"} for i in range(4)],
+        "concurrency": 2,
+        "card": {"holder": "Test Person", "number": "4242424242424242", "expiry": "12/39", "cvv": "123"},
+        "identity": {"full_name": "Test Person", "organization": "Test Org", "address": "Test Street 1",
+                     "city": "Test City", "region": "Test Region", "country": "ID", "postal_code": "12345"},
+        "amount_usd": "5.00", "total_limit_usd": "20.00",
+    }

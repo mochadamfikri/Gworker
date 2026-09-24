@@ -1,0 +1,36 @@
+[Unit]
+Description=AntWork private worker panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=antwork
+Group=antwork
+WorkingDirectory=/opt/AntWork
+EnvironmentFile=/etc/antwork.env
+Environment=TMPDIR=/run/antwork
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/AntWork/.browsers
+Environment=ANTWORK_DATABASE=/var/lib/antwork/metadata.db
+ExecStart=/opt/AntWork/.venv/bin/uvicorn antwork.app:create_app --factory --host 127.0.0.1 --port 8090 --workers 1 --no-access-log --ws-max-size 16384
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=antwork
+RuntimeDirectoryMode=0700
+StateDirectory=antwork
+StateDirectoryMode=0700
+UMask=0077
+LimitCORE=0
+CPUQuota=120%
+MemoryHigh=3G
+MemoryMax=4G
+MemorySwapMax=0
+TasksMax=1024
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/antwork /run/antwork
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

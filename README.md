@@ -1,61 +1,126 @@
-# Google Family Link Assistant Worker (Termux)
+# AntWork
 
-CLI worker yang **hardened dan human-in-the-loop** untuk menyiapkan dan melacak
-aksi Family Link yang *sah/terotorisasi*. Login, consent, OTP, CAPTCHA, dan
-pembuatan akun **selalu** dilakukan di UI resmi Google — worker ini tidak pernah
-melakukannya untuk Anda.
+Private admin panel for isolated browser workers. Rebuild of Gworker.
 
-## Instalasi (Termux / Linux / macOS)
+## Current status
 
-```bash
-pkg install python          # Termux saja; butuh Python 3.11+
-pip install -e .            # dari folder repo ini (memberi perintah `familylink`)
-# atau tanpa install:
-pip install -r requirements.txt
-python -m familylink --help
+The panel, account import, concurrency scheduler, authentication, ephemeral batch
+secrets, encrypted per-worker login sessions, interruption handling, and interactive
+browser control are implemented. Session cookies can be restored after restart.
+`ANTWORK_WORKERS_ENABLED=1` enables real browser workers independently of
+payment automation. Workers attempt Google login, fill uniquely identified identity,
+amount and Stripe card fields, then pause for operator attention. Google MFA,
+KYC and 3DS stay under operator control. Unknown controls also require attention.
+The operator can save and close the session; this records `session_saved_unverified`,
+never a confirmed payment. Original credentials and card fields remain ephemeral.
+
+**Automatic purchase submission and linked-card checkout remain disabled.**
+`ANTWORK_LIVE_ENABLED=0` must remain in place. Screenshot references now include
+billing labels, total charges, the purchase-processing overlay, identity checks,
+and a funded dashboard. These establish the visual flow but do not verify the
+live DOM, amount selector, payment method selection or transaction receipt.
+Passing CI verifies local fixtures, not Google login acceptance or live billing.
+
+Retry refreshes the selected worker only. Cek checks the saved dashboard session;
+linked-card top-up and live mailbox extraction remain gated.
+
+## Backup
+
+- Original commit: `d48f329fc685e946a4be06e3688696986e29ba31`
+- GitHub branch: `backup/pre-antwork-20260924`
+- VPS Git bundle: `/opt/backups/Gworker-before-AntWork-20260924.bundle`
+- SHA-256: `3c9308fe67f49454179299cb2aea39636e62292f9a842ae326dcf76fde42a816`
+
+Restore with `git clone /opt/backups/Gworker-before-AntWork-20260924.bundle restored-gworker`.
+
+## Development and tests
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install --no-deps -e .
+.venv/bin/python -m playwright install --with-deps chromium
+.venv/bin/pytest -q
+node --check antwork/static/app.js
 ```
 
-## Alur pemakaian
+`tests/test_browser.py` runs real Chromium against local fixtures only. Tests
+cover concurrency, attention timeouts, cancellation, restart recovery, secret
+redaction, login/Origin checks, CSV/TXT import, responsive layout, remote input,
+and cookie isolation. No real accounts, card details, or payments belong in CI.
 
-```bash
-familylink init                          # buat DB SQLite + key terenkripsi (perms 600)
-familylink family-head login             # daftarkan identifier wali (email) — TANPA password
-familylink job create                    # buat job: nama anak, tanggal lahir, consent wali
-familylink jobs                          # daftar semua job
-familylink confirm JOB_ID --result created   # catat hasil dari UI resmi Google
-familylink resume JOB_ID                 # lanjutkan job (wajib review manusia)
-familylink cancel JOB_ID                 # batalkan job
-familylink audit JOB_ID                  # audit trail (sudah diredaksi)
-familylink monitor                       # dashboard live (Rich)
-```
+## Operator workflow
 
-Hasil yang boleh dicatat: `created`, `linked`, `pending`, `rejected`,
-`cancelled`, `unknown`.
+1. Log into the private panel.
+2. Import TXT or CSV with **one `email:password` per line**; one quoted CSV column
+   is also accepted. Only the first colon separates the email and password.
+3. Enter billing identity, Visa details, USD credit amount per account, a total
+   batch limit, and concurrency. Review the total and authorize the batch.
+4. Each queued account gets an isolated browser. `Need attention` retains its
+   slot, preserving the maximum number of browsers. Other active workers continue.
+5. Open the worker browser for manual verification. Only one controller can
+   connect. Closing the view leaves automation paused; click **Lanjutkan** after
+   finishing. The worker must verify the result rather than trusting that click.
+6. After a worker finishes, **Buka sesi** queues a browser using its saved login.
+   **Retry** refreshes the selected worker page, or restores its encrypted saved
+   URL/session if closed. A page resulting from a POST is not automatically
+   resubmitted. Retry never initiates a payment or sends an email.
+   **Cek** opens a dialog for the USD amount and maximum final charge. It checks
+   `https://platform.claude.com/dashboard`, then uses the card already linked to
+   Claude if authenticated. No raw card or CVV is requested for this operation.
+   **Cek login saja** checks without authorizing a purchase. Logout means login is
+   required, not a proven suspension. Ambiguous pages request operator attention.
+   Operations share the browser concurrency limit and one session cannot run two
+   operations concurrently. Duplicate top-up request IDs do not submit twice.
+7. Raising concurrency launches queued workers. Lowering it allows current
+   workers to finish before starting more. A failed payment is never auto-retried.
 
-## Konfigurasi (opsional, via environment)
+## Data and deployment
 
-| Variabel | Default | Keterangan |
-|---|---|---|
-| `FAMILYLINK_HOME` | `~/.familylink` | Lokasi DB + key |
-| `FAMILYLINK_MAX_FAMILY_MEMBERS` | `6` | Kapasitas anggota keluarga |
-| `FAMILYLINK_MAX_PENDING_JOBS` | `5` | Batas job pending per family head |
-| `FAMILYLINK_MAX_ATTEMPTS` | `5` | Maks retry untuk kegagalan transien |
-| `FAMILYLINK_BACKOFF_BASE_SECONDS` | `2.0` | Basis exponential backoff |
-| `FAMILYLINK_TOTAL_TIME_WINDOW_SECONDS` | `86400` | Jendela waktu total retry |
+SQLite stores job IDs, email addresses, statuses, fixed status messages,
+timestamps, submission IDs, authorized top-up amounts/limits, and the billing
+address explicitly saved by the admin.
+Names, organization identity, account passwords, and card details are held in the active
+batch's memory, never in database records or logs. Remote frames exist in memory
+only, with no screenshot files, HAR, traces, or recordings. References are released
+after batch completion/cancellation; this is not a guarantee of secure RAM erasure.
+Restart marks unfinished jobs `interrupted`; payments are never replayed.
 
-## Kebijakan keamanan
+Google/Claude/Persona authentication cookies and the last allowed-provider URL are saved in encrypted `.session` files with a separate
+Fernet key, directory mode 0700 and file mode 0600. They are checkpointed while
+a worker is active, before attention, and before closing. No payment-provider
+cookies, localStorage, IndexedDB, email bodies, form values, or
+passwords are saved. Missing/expired authentication may still require login again.
+Keep the original session directory and master key together in a protected backup;
+never commit either. Missing keys with existing sessions stop startup rather than
+silently destroying recoverability. Login state is retained until explicitly removed.
 
-- Tidak pernah menyimpan password, cookie, token, atau OTP.
-- Identifier family head dienkripsi (Fernet) dengan key file berizin `600`.
-- Audit log diredaksi: tanpa OTP, kredensial, atau data pribadi lengkap.
-- Penolakan permanen tidak pernah di-retry otomatis; kegagalan transien
-  memakai exponential backoff terbatas, lalu eskalasi ke review manusia.
-- Idempotency key mencegah job duplikat saat Termux restart.
-- Tanggal lahir tidak pernah dimodifikasi diam-diam; kelayakan umur diputuskan
-  Google di alur resmi, bukan di-hard-code di sini.
+Email results are separate from payment completion. No suspension email means only
+`no_suspend_detected` at the check time, not proof the account passed KYC or remains
+active. A previously detected suspension is not cleared by a later empty search.
+Email checks execute only on explicit request. Retry is a page refresh, not a resend.
 
-## Tes
+Use the dedicated service account in `deploy/antwork.service`, one Uvicorn process,
+HTTPS with an authenticated panel, a RAM-backed runtime directory, disabled core
+dumps and swap for the service. Do not run real secrets in a development server
+that writes browser temporary files to a persistent `/tmp`.
 
-```bash
-pytest
-```
+Never put secrets in GitHub, Actions variables/artifacts, screenshots, access logs,
+or command-line arguments. Nginx must use `client_max_body_size 256k`,
+`client_body_buffer_size 256k`, `proxy_request_buffering off`,
+`proxy_buffering off`, `access_log off`, and forward WebSocket Upgrade headers.
+Panel hostname: `idsework.duckdns.org` (DNS verified as `54.151.240.15`). The Nginx site uses its own TLS certificate. Do not replace existing application services.
+
+## Gates for enabling live payments
+
+- GitHub Actions green on the exact candidate commit.
+- Verified authenticated onboarding and billing adapter, including amount/currency,
+  final total, KYC/3DS attention, and an explicit successful transaction result.
+- Controlled end-to-end run on an authorized test account with the approved amount.
+- Correct panel hostname, TLS, admin password provisioning, and service limits.
+
+The admin panel is deployable with financial automation disabled. Use
+`/opt/AntWork`, the dedicated `antwork` service on loopback port 8090,
+`/var/lib/antwork` for data and encrypted sessions, and the separate Nginx site
+`deploy/nginx-antwork.conf`. Existing sellerbottel code, database and port 8000
+are independent. CPU and memory limits constrain AntWork browser workloads.
