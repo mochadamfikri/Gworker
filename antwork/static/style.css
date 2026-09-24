@@ -24,3 +24,5 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--accent)}
 ::selection{background:#75974488;color:white}
 @media(max-width:740px){.page-heading h1{font-size:34px}.page-heading>.primary{width:100%;text-align:center}.metrics article{min-height:139px}.table-wrap{scrollbar-width:thin}.login-card{padding:27px}.browser-toolbar button{min-height:42px}input,textarea,select{font-size:16px}.dialog-actions{flex-wrap:wrap}.dialog-actions button{flex:1}.help-strip{padding:16px}header{font-size:11px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+.header-actions{display:flex;align-items:center;gap:16px}.header-actions #logout{min-height:44px;padding:8px 4px;color:var(--accent)}
