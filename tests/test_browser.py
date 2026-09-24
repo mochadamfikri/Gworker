@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright
 
 from antwork.browser import BrowserDriver
 from antwork.models import Control
+from antwork.recognition import PageKind
 
 STATIC = Path(__file__).parents[1] / "antwork" / "static"
 
@@ -68,5 +69,33 @@ async def test_remote_input_and_browser_isolation():
         other = await driver.browser.new_context()
         assert await other.cookies() == []
         await other.close()
+    finally:
+        await driver.close()
+
+
+@pytest.mark.parametrize("viewport", [{"width":390,"height":844},{"width":1280,"height":800}])
+async def test_branch_recognition_in_frames_on_mobile_and_desktop(viewport):
+    driver = BrowserDriver()
+    try:
+        await driver.open()
+        await driver.page.set_viewport_size(viewport)
+        async def route(route):
+            if route.request.url == "https://platform.claude.com/":
+                await route.fulfill(content_type="text/html",body='<iframe src="https://bank.test/challenge"></iframe>')
+            elif route.request.url == "https://bank.test/challenge":
+                await route.fulfill(content_type="text/html",body='<p>ID Check. Kode Otentikasi Mastercard. ANTHROPIC USD 0,00</p>')
+            else:
+                await route.fulfill(content_type="text/html",body='<h1>Continue on another device</h1><p>Scan the QR code</p><button>Send Email</button>')
+        await driver.context.route("**/*",route)
+        await driver.page.goto("https://platform.claude.com/")
+        assert await driver.inspect_state() == PageKind.bank_otp
+        popup = await driver.context.new_page()
+        await popup.goto("https://inquiry.withpersona.com/test")
+        assert await driver.inspect_state() == PageKind.persona_device
+        assert driver.page is popup
+        await popup.set_content('<h1>Tautan kedaluwarsa</h1>')
+        assert await driver.inspect_state() == PageKind.persona_expired
+        await popup.set_content('<h1>Selamat, Anda sudah selesai!</h1><p>Terima kasih telah memverifikasi identitas Anda.</p>')
+        assert await driver.inspect_state() == PageKind.persona_complete
     finally:
         await driver.close()

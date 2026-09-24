@@ -16,6 +16,12 @@ current browser adapter is a commissioning draft, not a working payment adapter.
 `ANTWORK_LIVE_ENABLED` defaults to `0`; do not enable it to perform transactions.
 Passing CI verifies local fixtures only, not Google login acceptance or live billing.
 
+Nine mobile screenshots have now been mapped into independent page recognizers
+for organization choice, bank OTP/app approval, and Persona camera/device/expiry/
+completion branches. See [the reference map](docs/reference-flow.md). Recognition
+uses page and iframe text with origin checks, not fixed screen coordinates. These
+clues are tested in mobile and desktop fixtures; the live integration gates remain.
+
 ## Backup
 
 - Original commit: `d48f329fc685e946a4be06e3688696986e29ba31`

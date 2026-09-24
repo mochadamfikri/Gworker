@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
+from .recognition import ATTENTION_MESSAGES, PageKind, recognize
+
 
 class BrowserDriver:
     billing_verified = False
@@ -38,6 +40,37 @@ class BrowserDriver:
         await self.page.goto("https://platform.claude.com/", wait_until="domcontentloaded")
         await attention(job, "Sesi tersimpan dibuka; login ulang jika sesi sudah kedaluwarsa")
         return "session_opened"
+
+    async def inspect_state(self):
+        """Inspect page/iframe text without keeping DOM snapshots or recordings."""
+        for page in reversed(self.context.pages):
+            if page.is_closed():
+                continue
+            for frame in page.frames:
+                try:
+                    content = await frame.locator("body").inner_text(timeout=1500)
+                except Exception:
+                    continue
+                kind = recognize(frame.url, content[:120_000], owner_url=page.url)
+                if kind != PageKind.unknown:
+                    self.page = page
+                    return kind
+        return PageKind.unknown
+
+    async def attend_current_page(self, job, attention):
+        kind = await self.inspect_state()
+        await attention(job, ATTENTION_MESSAGES.get(kind, ATTENTION_MESSAGES[PageKind.unknown]))
+        return kind
+
+    async def handle_organization_picker(self):
+        if await self.inspect_state() != PageKind.organization_picker:
+            return False
+        create = self.page.get_by_role("button", name=re.compile(
+            r"^(Buat organisasi baru|Create (a )?new organization)$", re.I))
+        if not await self.visible(create):
+            return False
+        await create.click()
+        return True
 
     async def visible(self, locator):
         return await locator.count() == 1 and await locator.is_visible()
@@ -78,9 +111,10 @@ class BrowserDriver:
 
         # Billing/onboarding varies per organization. Until a verified adapter is
         # available, never guess a checkout button or claim payment completion.
-        await attention(job, "Selesaikan onboarding lalu buka formulir metode pembayaran")
+        await self.handle_organization_picker()
+        await self.attend_current_page(job, attention)
         await self.fill_card(batch.card)
-        await attention(job, "Periksa formulir pembayaran dan selesaikan konfirmasi/3DS")
+        await self.attend_current_page(job, attention)
         # Explicitly stop rather than manufacture success from a generic page.
         raise RuntimeError("Live billing success detection is not configured")
 
