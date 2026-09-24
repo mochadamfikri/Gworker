@@ -10,7 +10,7 @@ browser control are implemented. Session cookies can be restored after restart.
 Email extraction and card checkout remain gated until their live flows have been
 mapped and verified. Retry refreshes only the selected worker page. Cek opens the
 Claude dashboard and can queue an explicitly authorized top-up on the linked card.
-**Live Claude onboarding and credit purchases are not ready for deployment.**
+**Automatic signup and credit purchases remain disabled pending live verification.**
 The authenticated forms, checkout total, KYC/3DS detection, and reliable purchase
 confirmation still need to be mapped against an authorized test account. The
 current browser adapter is a commissioning draft, not a working payment adapter.
@@ -108,10 +108,9 @@ Never put secrets in GitHub, Actions variables/artifacts, screenshots, access lo
 or command-line arguments. Nginx must use `client_max_body_size 256k`,
 `client_body_buffer_size 256k`, `proxy_request_buffering off`,
 `proxy_buffering off`, `access_log off`, and forward WebSocket Upgrade headers.
-Panel hostname: `idsework.duckdns.org` (DNS verified as `54.151.240.15`). TLS certificate provisioning remains pending. Do not restart or
-replace existing services while preparing this project.
+Panel hostname: `idsework.duckdns.org` (DNS verified as `54.151.240.15`). The Nginx site uses its own TLS certificate. Do not replace existing application services.
 
-## Release gates
+## Gates for enabling live payments
 
 - GitHub Actions green on the exact candidate commit.
 - Verified authenticated onboarding and billing adapter, including amount/currency,
@@ -119,5 +118,8 @@ replace existing services while preparing this project.
 - Controlled end-to-end run on an authorized test account with the approved amount.
 - Correct panel hostname, TLS, admin password provisioning, and service limits.
 
-The final service directory is `/opt/AntWork`. The current checkout is development
-source only; no AntWork service has been installed or deployed.
+The admin panel is deployable with financial automation disabled. Use
+`/opt/AntWork`, the dedicated `antwork` service on loopback port 8090,
+`/var/lib/antwork` for data and encrypted sessions, and the separate Nginx site
+`deploy/nginx-antwork.conf`. Existing sellerbottel code, database and port 8000
+are independent. CPU and memory limits constrain AntWork browser workloads.

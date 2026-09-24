@@ -3,3 +3,24 @@
 .address-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px}
 
 .session-note{display:block;color:#9cad85;margin-top:3px}.account-note,.suspended-note{font-size:10px;margin-top:6px}.suspended-note{color:#eda69e}
+
+/* Quiet olive palette, soft depth, and comfortable mobile controls. */
+body{background:radial-gradient(ellipse at 95% 0%,#26351b55,transparent 45%),var(--bg)}
+main{min-height:100vh}
+.brand{width:fit-content}.brand strong{font-weight:650}
+.page-heading{position:relative}.page-heading .primary{box-shadow:0 4px 24px #b6de6d12}
+.metrics article{background:linear-gradient(135deg,#1d231c,var(--panel));box-shadow:0 4px 20px #0000000c;transition:border-color .18s,transform .18s}
+.metrics article:hover{border-color:#58644b;transform:translateY(-2px)}
+.metrics .attention-metric{background:linear-gradient(135deg,#2b271c,#211f19)}
+.workers-panel{box-shadow:0 14px 55px #00000018}
+.empty{background:radial-gradient(ellipse at center,#2d3a2022,transparent 65%)}
+.empty-icon{box-shadow:0 0 0 7px #222a1f55,0 0 0 14px #222a1f22}
+.empty h3{letter-spacing:-.3px}
+.login-card{box-shadow:0 30px 100px #0006;background:linear-gradient(150deg,#1e271a,#151a13)}
+button{transition:background .15s,border-color .15s,box-shadow .15s}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent)}
+.primary:not(:disabled):active,.secondary:not(:disabled):active{transform:translateY(1px)}
+#topup-error{color:var(--amber);font-size:12px;margin-top:14px}
+::selection{background:#75974488;color:white}
+@media(max-width:740px){.page-heading h1{font-size:34px}.page-heading>.primary{width:100%;text-align:center}.metrics article{min-height:139px}.table-wrap{scrollbar-width:thin}.login-card{padding:27px}.browser-toolbar button{min-height:42px}input,textarea,select{font-size:16px}.dialog-actions{flex-wrap:wrap}.dialog-actions button{flex:1}.help-strip{padding:16px}header{font-size:11px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
