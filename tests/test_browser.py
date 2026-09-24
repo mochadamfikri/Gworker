@@ -186,7 +186,7 @@ async def test_worker_runs_google_then_checkout_and_saves_without_claiming_payme
             if url == 'https://platform.claude.com/':
                 body = '<button onclick="location.href=\'https://accounts.google.com/login\'">Continue with Google</button>'
             elif url.endswith('/login'):
-                body = '<input type="email"><button id="identifierNext" onclick="location.href=\'/password\'">Next</button>'
+                body = '<input type="email" style="display:none"><script>setTimeout(()=>document.querySelector("input").style.display="block",2600)</script><button id="identifierNext" onclick="location.href=\'/password\'">Next</button>'
             elif url.endswith('/password'):
                 body = '<input type="password"><button id="passwordNext" onclick="location.href=\'https://platform.claude.com/dashboard\'">Next</button>'
             elif 'stripe.com' in url:

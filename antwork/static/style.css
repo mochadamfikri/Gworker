@@ -26,3 +26,11 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--accent)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
 
 .header-actions{display:flex;align-items:center;gap:16px}.header-actions #logout{min-height:44px;padding:8px 4px;color:var(--accent)}
+
+/* Long account names must not widen the mobile browser controls. */
+.dialog-heading>div{min-width:0;flex:1}.dialog-heading .icon-button{flex-shrink:0}
+#browser-title{overflow-wrap:anywhere;font-size:clamp(18px,4vw,26px)}
+.browser-dialog{overflow-x:hidden}.browser-toolbar label{min-width:0;max-width:100%}
+.browser-toolbar select{max-width:100%}.browser-screen{min-width:0;width:100%}
+.browser-screen img{width:100%;object-fit:contain}
+@media(max-width:740px){.browser-toolbar label{width:100%}.browser-toolbar select{flex:1;min-width:0}.browser-dialog .dialog-heading{align-items:flex-start}}

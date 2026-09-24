@@ -114,6 +114,26 @@ class BrowserDriver:
     async def visible(self, locator):
         return await locator.count() == 1 and await locator.is_visible()
 
+    async def wait_google_transition(self, email_sent=False, password_sent=False, entering=False):
+        """Wait for OAuth navigation and hydrated fields without retrying submits."""
+        deadline = asyncio.get_running_loop().time() + 12
+        while asyncio.get_running_loop().time() < deadline:
+            pages = [page for page in self.context.pages if not page.is_closed()]
+            for page in reversed(pages):
+                if urlparse(page.url).hostname != "accounts.google.com":
+                    continue
+                self.page = page
+                try:
+                    if (not email_sent and await self.visible(page.locator('input[type="email"]'))) or (
+                        not password_sent and await self.visible(page.locator('input[type="password"]'))
+                    ):
+                        return
+                except Exception:
+                    pass  # The frame can detach while OAuth is navigating.
+            if not entering and not self.page.is_closed() and urlparse(self.page.url).hostname != "accounts.google.com":
+                return
+            await asyncio.sleep(.2)
+
     async def run(self, job, account, batch, attention):
         await self.open()
         await self.page.goto("https://platform.claude.com/", wait_until="domcontentloaded")
@@ -131,6 +151,9 @@ class BrowserDriver:
             host = urlparse(self.page.url).hostname
             try:
                 if host == "accounts.google.com":
+                    await self.wait_google_transition(email_sent, password_sent)
+                    if urlparse(self.page.url).hostname != "accounts.google.com":
+                        continue
                     email = self.page.locator('input[type="email"]')
                     password = self.page.locator('input[type="password"]')
                     if not email_sent and await self.visible(email):
@@ -152,7 +175,7 @@ class BrowserDriver:
                     if not google_clicked and await self.visible(google):
                         google_clicked = True
                         await google.click()
-                        await asyncio.sleep(2)
+                        await self.wait_google_transition(entering=True)
                         continue
                     if await self.handle_organization_picker():
                         await asyncio.sleep(1)
