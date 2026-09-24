@@ -80,6 +80,34 @@ def recognize(url, text, *, owner_url=None):
     return PageKind.unknown
 
 
+def recognize_account(url, text):
+    parsed = urlparse(url)
+    content = normalize(text)
+    if parsed.scheme != "https":
+        return "unknown"
+    if parsed.hostname == "accounts.google.com":
+        return "needs_login"
+    if parsed.hostname not in {"platform.claude.com", "console.anthropic.com"}:
+        return "unknown"
+    if any(message in content for message in (
+        "your account has been suspended", "your account is suspended",
+        "akun anda telah ditangguhkan", "akun anda ditangguhkan",
+    )):
+        return "suspended"
+    if any(message in content for message in (
+        "continue with google", "continue with email", "lanjutkan dengan google",
+        "lanjutkan dengan email", "sign in to claude console",
+    )):
+        return "needs_login"
+    # Positive authenticated UI evidence is required, not just the absence of a
+    # login form or the address bar saying /dashboard.
+    signed_in = any(marker in content for marker in ("log out", "sign out", "keluar"))
+    dashboard = any(marker in content for marker in ("api keys", "kunci api", "billing", "penagihan"))
+    if parsed.path.rstrip("/") == "/dashboard" and signed_in and dashboard:
+        return "ready_for_topup"
+    return "unknown"
+
+
 @dataclass(frozen=True)
 class MailEvidence:
     sender: str

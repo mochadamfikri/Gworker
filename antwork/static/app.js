@@ -27,7 +27,7 @@ function render() {
   $('total').textContent = jobs.length;
   $('running').textContent = jobs.filter(j => j.status === 'running').length;
   $('attention').textContent = jobs.filter(j => j.status === 'need_attention').length;
-  $('completed').textContent = jobs.filter(j => j.status === 'completed' && (!j.action || j.action === 'purchase')).length;
+  $('completed').textContent = jobs.filter(j => j.status === 'completed' && (!j.action || j.action === 'purchase' || j.result === 'payment_confirmed')).length;
   $('worker-count').textContent = jobs.length;
   $('release-notice').hidden = state.live_enabled;
   $('cancel-batch').hidden = !state.active_batch;
@@ -42,7 +42,7 @@ function render() {
     const row = document.createElement('tr');
     const account = row.insertCell();
     const email = document.createElement('strong'); email.textContent = job.email;
-    const actionNames = {purchase:'Pendaftaran & saldo',open_session:'Buka sesi',check_email:'Cek email',retry_kyc:'Retry KYC'};
+    const actionNames = {purchase:'Pendaftaran & saldo',open_session:'Buka sesi',check_email:'Cek email',check_account:'Cek dashboard',refresh_session:'Refresh sesi',check_topup:'Cek & isi saldo'};
     const id = document.createElement('small'); id.textContent = `${actionNames[job.action] || 'Worker'} · ${job.id.slice(0,8)}`;
     const session = document.createElement('small');
     session.textContent = job.session_status === 'saved' ? 'Sesi tersimpan' : job.session_status === 'save_failed' ? 'Sesi gagal disimpan' : 'Belum ada sesi tersimpan';
@@ -51,7 +51,7 @@ function render() {
     const badge = document.createElement('span'); badge.className = `status ${job.status}`; badge.textContent = statuses[job.status] || job.status;
     row.insertCell().append(badge);
     const phaseCell = row.insertCell(); phaseCell.textContent = job.phase;
-    const accountLabels = {suspended:'Akun: suspend terdeteksi',no_suspend_detected:'Akun: belum terdeteksi suspend',verification_required:'Akun: perlu verifikasi',needs_review:'Akun: perlu diperiksa'};
+    const accountLabels = {suspended:'Akun: suspend terdeteksi',no_suspend_detected:'Akun: belum terdeteksi suspend',verification_required:'Akun: perlu verifikasi',needs_review:'Akun: perlu diperiksa',needs_login:'Sesi: perlu login ulang',ready_for_topup:'Sesi: login valid · siap isi saldo'};
     if(accountLabels[job.account_status]) { const accountStatus=document.createElement('strong'); accountStatus.textContent=accountLabels[job.account_status]; accountStatus.className=job.account_status==='suspended'?'suspended-note':'account-note'; phaseCell.append(accountStatus); }
     const actions = row.insertCell();
     function button(text, action, className = 'secondary') {
@@ -62,6 +62,7 @@ function render() {
     }
     if (job.status === 'need_attention') {
       button('Buka browser', () => openBrowser(job));
+      button('Retry', async () => { await post(`/jobs/${job.id}/actions/refresh_session`); await refresh(); });
       button('Lanjutkan', async () => { await post(`/jobs/${job.id}/resume`); await refresh(); });
     }
     if (!terminal.has(job.status)) button('Batalkan', async () => {
@@ -72,12 +73,12 @@ function render() {
     if (terminal.has(job.status) && job.action === 'purchase' && job.session_status === 'saved') {
       const queueAction = async action => { await post(`/jobs/${job.id}/actions/${action}`); await refresh(); };
       button('Buka sesi', () => queueAction('open_session'));
+      button('Cek', () => openTopup(job));
       const check = button('Cek email', () => queueAction('check_email'));
       check.disabled = !state.email_check_enabled;
       if(check.disabled) check.title = 'Pemeriksa email belum diverifikasi';
-      const retry = button('Retry KYC', async () => { if(confirm('Kirim ulang link verifikasi Persona untuk akun ini? Pembayaran tidak diulang.')) await queueAction('retry_kyc'); });
-      retry.disabled = !state.kyc_retry_enabled;
-      if(retry.disabled) retry.title = 'Alur kirim ulang Persona belum diverifikasi';
+      const retry = button('Retry', () => queueAction('refresh_session'));
+      retry.title = 'Buka sesi worker ini dan muat ulang halaman tersimpannya';
     }
     return row;
   }));
@@ -180,3 +181,24 @@ $('save-address').onclick = async () => { const address = {}; for(const key of [
 function updateStart() { let valid = false; try { const list=accounts(); valid=list.length>0 && list.length<=100 && new Set(list.map(a=>a.email.toLowerCase())).size===list.length && Math.round(Number($('amount').value)*100)*list.length<=Math.round(Number($('total-limit').value)*100); } catch(_) {} $('start').disabled=submitting || !state.live_enabled || !!state.active_batch || !$('batch-form').checkValidity() || !valid; }
 $('batch-form').addEventListener('input',updateStart);
 $('batch-form').addEventListener('change',updateStart);
+
+let topupSource=null, topupRequest=null, topupSubmitting=false;
+function openTopup(job) {
+  topupSource=job.id; topupRequest=crypto.randomUUID();
+  $('topup-form').reset(); $('topup-account').textContent=job.email;
+  $('topup-error').textContent=state.saved_card_topup_enabled?'':'Pembelian kartu tertaut belum diaktifkan; pengecekan login tersedia.';
+  $('topup-submit').disabled=!state.saved_card_topup_enabled;
+  $('topup-dialog').showModal();
+}
+$('check-login').onclick=async()=>{
+  try { await post(`/jobs/${topupSource}/actions/check_account`); $('topup-dialog').close(); await refresh(); }
+  catch(e){$('topup-error').textContent=e.message;}
+};
+$('topup-form').onsubmit=async e=>{
+  e.preventDefault(); if(topupSubmitting)return;
+  if(Number($('topup-amount').value)>Number($('topup-limit').value)){$('topup-error').textContent='Nominal melebihi batas pembayaran';return;}
+  topupSubmitting=true; $('topup-submit').disabled=true;
+  try { await post(`/jobs/${topupSource}/topup`,{request_id:topupRequest,amount_usd:$('topup-amount').value,limit_usd:$('topup-limit').value}); $('topup-dialog').close(); await refresh(); }
+  catch(error){$('topup-error').textContent=error.message;}
+  finally{topupSubmitting=false;$('topup-submit').disabled=!state.saved_card_topup_enabled;}
+};

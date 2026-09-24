@@ -24,6 +24,8 @@ class Job:
     result: str = ""
     session_status: str = "not_saved"
     account_status: str = "unknown"
+    amount_usd: str = ""
+    limit_usd: str = ""
     resume: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     browser: object = field(default=None, repr=False)
     task: object = field(default=None, repr=False)
@@ -74,9 +76,19 @@ class Engine:
             self.runner = asyncio.create_task(self._schedule())
         self.wakeup.set()
 
-    def enqueue_action(self, source_id, action):
-        if action not in {"open_session", "check_email", "retry_kyc"}:
+    def enqueue_action(self, source_id, action, payment=None):
+        if action not in {"open_session", "check_email", "refresh_session", "check_account", "check_topup"}:
             raise ValueError("Aksi tidak dikenal")
+        if (action == "check_topup") != (payment is not None):
+            raise ValueError("Isi saldo memerlukan nominal dan batas pembayaran")
+        if payment:
+            request_key = "topup:" + str(payment.request_id)
+            existing = self.store.find_request(request_key)
+            if existing:
+                previous = self.store.get(existing)
+                if not previous or previous["source_id"] != source_id or previous["amount_usd"] != str(payment.amount_usd) or previous["limit_usd"] != str(payment.limit_usd):
+                    raise ValueError("Permintaan pembayaran sudah dipakai dengan data berbeda")
+                return existing
         source = self.store.get(source_id)
         if not source or source["action"] != "purchase":
             raise ValueError("Worker asal tidak ditemukan")
@@ -92,8 +104,13 @@ class Engine:
             raise ValueError("Belum ada sesi login tersimpan")
         job = Job(str(uuid4()), source["batch_id"], source["email"], action=action,
                   source_id=source_id, session_status="saved")
+        if payment:
+            job.amount_usd = str(payment.amount_usd)
+            job.limit_usd = str(payment.limit_usd)
+            self.store.record_payment_intent(request_key, job)
+        else:
+            self.store.put(job)
         self.jobs[job.id] = job
-        self.store.put(job)
         # A cancelled batch may have set concurrency=0; use at least one slot.
         self.concurrency = max(1, self.concurrency)
         self.ensure_runner()
@@ -137,6 +154,7 @@ class Engine:
                 saved = self.vault.load(job.source_id, job.email)
                 if not saved:
                     raise ValueError("Saved session unavailable")
+                driver.resume_url = self.vault.resume_url(job.source_id, job.email)
                 outcome = await driver.maintain(job, saved, self.attention)
                 messages = {
                     "session_opened": "Sesi selesai dibuka",
@@ -144,13 +162,16 @@ class Engine:
                     "no_suspend_detected": "Belum terdeteksi email suspend; bukan konfirmasi akun lolos",
                     "verification_required": "Email meminta verifikasi identitas",
                     "needs_review": "Hasil email perlu diperiksa manual",
-                    "resend_confirmed": "Pengiriman ulang link verifikasi terkonfirmasi",
+                    "page_refreshed": "Halaman sesi worker dimuat ulang",
+                    "needs_login": "Sesi logout atau kedaluwarsa; perlu login ulang, belum terbukti suspend",
+                    "ready_for_topup": "Login valid; siap lanjut isi saldo dengan data dan batas pembayaran yang disetujui",
+                    "payment_confirmed": "Isi saldo dengan kartu tertaut terkonfirmasi",
                 }
                 if outcome not in messages:
                     raise ValueError("Unverified action result")
                 job.result = outcome
                 source = self.store.get(job.source_id)
-                if source and outcome in {"suspended", "no_suspend_detected", "verification_required", "needs_review"}:
+                if source and outcome in {"suspended", "no_suspend_detected", "verification_required", "needs_review", "needs_login", "ready_for_topup"}:
                     source["status"] = Status(source["status"])
                     # A later empty inbox must not erase an established suspension.
                     if source["account_status"] != "suspended":
@@ -196,7 +217,10 @@ class Engine:
             return
         try:
             state = await job.browser.context.storage_state()
-            saved = self.vault.save(job.source_id or job.id, job.email, state)
+            page = getattr(job.browser, "page", None)
+            method = getattr(job.browser, "navigation_methods", {}).get(page, "GET")
+            saved = self.vault.save(job.source_id or job.id, job.email, state,
+                                    resume_url=getattr(page, "url", None) if method == "GET" else None)
             if saved:
                 job.session_status = "saved"
         except Exception:
@@ -208,6 +232,24 @@ class Engine:
                 source["status"] = Status(source["status"])
                 source["session_status"] = job.session_status
                 self.store.put(Job(**source))
+
+    async def refresh_active(self, job_id):
+        job = self.jobs[job_id]
+        if job.status != Status.attention or not job.browser or job.controller:
+            raise ValueError("Tutup kontrol browser; Retry tersedia saat worker Need attention")
+        job.controller = True
+        browser = job.browser
+        try:
+            await browser.refresh_page()
+            await self.save_session(job)
+            kind = await browser.inspect_state()
+            if job.status != Status.attention or job.browser is not browser:
+                raise ValueError("Worker sudah berhenti; buka sesi tersimpan untuk melanjutkan")
+            from .recognition import ATTENTION_MESSAGES, PageKind
+            message = ATTENTION_MESSAGES.get(kind, ATTENTION_MESSAGES[PageKind.unknown])
+            self.update(job, Status.attention, "Halaman dimuat ulang. " + message)
+        finally:
+            job.controller = False
 
     def continue_job(self, job_id):
         job = self.jobs[job_id]

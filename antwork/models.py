@@ -114,6 +114,18 @@ class Login(StrictModel):
     password: SecretStr = Field(min_length=1, max_length=1024)
 
 
+class SavedCardTopup(StrictModel):
+    request_id: UUID
+    amount_usd: Decimal = Field(gt=0, le=10000, max_digits=7, decimal_places=2)
+    limit_usd: Decimal = Field(gt=0, le=10000, max_digits=7, decimal_places=2)
+
+    @model_validator(mode="after")
+    def within_limit(self):
+        if self.amount_usd > self.limit_usd:
+            raise ValueError("Nominal melebihi batas pembayaran")
+        return self
+
+
 class Control(StrictModel):
     kind: str = Field(pattern="^(click|text|key|scroll|tab)$")
     x: int = Field(default=0, ge=0, le=1280)

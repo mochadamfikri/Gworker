@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from antwork.recognition import MailEvidence, PageKind, classify_mail, recognize
+from antwork.recognition import MailEvidence, PageKind, classify_mail, recognize, recognize_account
 
 
 @pytest.mark.parametrize("text,expected", [
@@ -55,3 +55,13 @@ def test_naive_or_inverted_timestamps_are_not_passes():
     assert classify([evidence(received_at=datetime(2026,9,24))]) == "needs_review"
     assert classify([],since=datetime(2026,9,24)) == "needs_review"
     assert classify([],since=datetime(2026,9,26,tzinfo=timezone.utc)) == "needs_review"
+
+
+def test_dashboard_check_distinguishes_expired_login_and_suspension():
+    assert recognize_account("https://platform.claude.com/", "Continue with Google") == "needs_login"
+    assert recognize_account("https://accounts.google.com/signin", "Sign in") == "needs_login"
+    assert recognize_account("https://platform.claude.com/dashboard", "Your account has been suspended") == "suspended"
+    assert recognize_account("https://platform.claude.com/dashboard", "Billing API keys Log out") == "ready_for_topup"
+    assert recognize_account("https://platform.claude.com/dashboard", "Loading") == "unknown"
+    assert recognize_account("https://evil.example/dashboard", "Billing API keys Log out") == "unknown"
+    assert recognize_account("https://platform.claude.com/", "Billing API keys Log out") == "unknown"

@@ -20,6 +20,8 @@ class Store:
             "result": "TEXT NOT NULL DEFAULT ''",
             "session_status": "TEXT NOT NULL DEFAULT 'not_saved'",
             "account_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "amount_usd": "TEXT NOT NULL DEFAULT ''",
+            "limit_usd": "TEXT NOT NULL DEFAULT ''",
         }.items():
             if name not in columns:
                 self.db.execute(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
@@ -30,16 +32,23 @@ class Store:
         self.db.execute("CREATE TABLE IF NOT EXISTS batches (request_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL)")
         self.db.commit()
 
-    def put(self, job):
+    def put(self, job, commit=True):
         self.db.execute("""INSERT OR REPLACE INTO jobs
-            (id,batch_id,email,status,phase,created,updated,action,source_id,result,session_status,account_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            (id,batch_id,email,status,phase,created,updated,action,source_id,result,session_status,account_status,amount_usd,limit_usd)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             job.id, job.batch_id, job.email, job.status.value,
             job.phase, job.created, job.updated,
             job.action, job.source_id, job.result, job.session_status,
             job.account_status,
+            job.amount_usd, job.limit_usd,
         ))
-        self.db.commit()
+        if commit:
+            self.db.commit()
+
+    def record_payment_intent(self, request_id, job):
+        with self.db:
+            self.db.execute("INSERT INTO batches VALUES (?, ?)", (str(request_id),job.id))
+            self.put(job, commit=False)
 
     def list(self):
         return [dict(row) for row in self.db.execute(

@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from antwork.models import BatchInput
+from antwork.models import BatchInput, SavedCardTopup
+from uuid import uuid4
 
 
 def test_valid_secrets_hidden(payload):
@@ -22,3 +23,12 @@ def test_duplicate_and_spending_limit(payload):
     payload["total_limit_usd"] = "20.00"
     payload["accounts"][1]["email"] = payload["accounts"][0]["email"].upper()
     with pytest.raises(ValidationError): BatchInput(**payload)
+
+
+def test_linked_card_topup_requires_amount_and_limit_but_no_card():
+    data = {"request_id":str(uuid4()),"amount_usd":"5.00","limit_usd":"6.00"}
+    assert SavedCardTopup(**data).amount_usd == 5
+    with pytest.raises(ValidationError):
+        SavedCardTopup(**{**data,"limit_usd":"4.99"})
+    with pytest.raises(ValidationError):
+        SavedCardTopup(**data,cvv="123")

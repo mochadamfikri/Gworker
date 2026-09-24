@@ -76,10 +76,20 @@ def test_save_only_address(client):
     assert client.put("/api/address",json={**address,"cvv":"123"},headers=headers).status_code == 422
 
 
-def test_unverified_email_and_retry_never_execute(client):
+def test_unverified_email_and_missing_session_never_execute(client):
     headers = login(client)
     state = client.get("/api/state").json()
-    assert not state["email_check_enabled"] and not state["kyc_retry_enabled"]
-    for action in ["check_email", "retry_kyc"]:
+    assert not state["email_check_enabled"] and state["refresh_enabled"]
+    for action in ["check_email", "refresh_session", "retry_kyc"]:
         assert client.post(f"/api/jobs/unknown/actions/{action}",headers=headers).status_code == 409
+    assert not client.get("/api/state").json()["jobs"]
+
+
+def test_saved_card_checkout_is_gated_until_verified(client):
+    from uuid import uuid4
+    headers = login(client)
+    response = client.post("/api/jobs/unknown/topup",headers=headers,json={
+        "request_id":str(uuid4()),"amount_usd":"5.00","limit_usd":"6.00",
+    })
+    assert response.status_code == 409
     assert not client.get("/api/state").json()["jobs"]

@@ -27,6 +27,18 @@ inspect the current state and confirm the provider's result before reporting tha
 a fresh link was sent. No retry on a generic button labeled “Kirim Ulang”: that
 could resend a bank OTP rather than a Persona verification link.
 
+## Current operator actions
+
+Retry now means refreshing the selected worker's current page, not resending an
+email or creating a new Persona inquiry. When the browser has closed, restore its
+encrypted cookies and last allowed-provider URL. If the URL is expired, refresh
+may still show expiry; request operator attention. Never report a new link sent.
+
+Cek opens `platform.claude.com/dashboard` and, with an explicit amount/charge
+limit, continues toward a purchase on the card already linked to that account.
+Logout is a session/authentication result; only explicit suspension evidence is
+classified as suspension. Stored-card checkout requires no new card number/CVV.
+
 ## What is still missing for live verification
 
 - Authenticated onboarding form fields and the actual checkout showing USD amount,
@@ -34,9 +46,7 @@ could resend a bank OTP rather than a Persona verification link.
 - Current DOM and URLs from an authorized browser session; screenshots establish
   text/state clues, not stable element selectors or embedded-frame origins.
 - Expanded suspension-email header showing the sender address and mailbox/time.
-- Persona's email destination step and sent confirmation, and the official route
-  for requesting a new link after expiry.
 
-Until those are verified, billing, email extraction, and Persona resend capabilities
+Until those are verified, billing and email extraction capabilities
 remain disabled. Recognition is locale-aware for the observed Indonesian/English
 texts and independent of viewport coordinates. Unknown variants request attention.

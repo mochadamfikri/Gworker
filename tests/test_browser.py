@@ -99,3 +99,66 @@ async def test_branch_recognition_in_frames_on_mobile_and_desktop(viewport):
         assert await driver.inspect_state() == PageKind.persona_complete
     finally:
         await driver.close()
+
+
+async def test_retry_refreshes_only_selected_worker_and_does_not_repeat_post():
+    driver = BrowserDriver()
+    other = BrowserDriver()
+    requests = []
+    other_requests = []
+    try:
+        await driver.open()
+        await other.open()
+        async def route(route):
+            requests.append(route.request.method)
+            await route.fulfill(content_type="text/html",body='<form method="post" action="/submitted"><button>Submit fixture</button></form>')
+        async def other_route(route):
+            other_requests.append(route.request.method)
+            await route.fulfill(content_type="text/html",body='Other worker')
+        await driver.context.route("**/*",route)
+        await other.context.route("**/*",other_route)
+        await driver.page.goto("https://platform.claude.com/dashboard")
+        await other.page.goto("https://platform.claude.com/dashboard")
+        await driver.refresh_page()
+        assert requests == ["GET","GET"]
+        assert other_requests == ["GET"]
+        async with driver.page.expect_navigation():
+            await driver.page.get_by_role("button",name="Submit fixture").click()
+        assert requests[-1] == "POST"
+        before = len(requests)
+        with pytest.raises(ValueError):
+            await driver.refresh_page()
+        assert len(requests) == before
+    finally:
+        await driver.close()
+        await other.close()
+
+
+async def test_check_topup_dialog_uses_linked_card_without_collecting_cvv():
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch()
+        page = await browser.new_page()
+        submitted = []
+        async def route_handler(route):
+            path = route.request.url.replace("https://antwork.test", "")
+            if path == "/api/state":
+                return await route.fulfill(json={"jobs":[{"id":"worker-one","email":"one@example.com","status":"completed","action":"purchase","phase":"Complete","session_status":"saved"}],"active_batch":None,"concurrency":3,"max_concurrency":5,"live_enabled":False,"saved_card_topup_enabled":True})
+            if path == "/api/jobs/worker-one/topup":
+                submitted.append(json.loads(route.request.post_data))
+                return await route.fulfill(status=202,json={"job_id":"topup-one"})
+            if path in {"/", "/static/app.js", "/static/style.css"}:
+                name = "index.html" if path == "/" else path.rsplit("/",1)[1]
+                return await route.fulfill(path=str(STATIC / name))
+            await route.abort()
+        await page.route("**/*",route_handler)
+        await page.goto("https://antwork.test/")
+        await page.get_by_role("button",name="Cek",exact=True).click()
+        await page.locator("#topup-amount").fill("5.00")
+        await page.locator("#topup-limit").fill("6.00")
+        assert await page.locator('#topup-dialog input[type="password"]').count() == 0
+        await page.get_by_role("button",name="Cek & isi saldo",exact=True).click()
+        await page.wait_for_function("!document.querySelector('#topup-dialog').open")
+        assert len(submitted) == 1
+        assert set(submitted[0]) == {"request_id","amount_usd","limit_usd"}
+        assert submitted[0]["amount_usd"] == "5.00"
+        await browser.close()

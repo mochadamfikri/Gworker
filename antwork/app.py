@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from .browser import BrowserDriver
 from .engine import Engine
-from .models import BatchInput, Control, Login, SavedAddress, Status
+from .models import BatchInput, Control, Login, SavedAddress, SavedCardTopup, Status
 from .store import Store
 from .sessions import SessionVault
 
@@ -147,7 +147,9 @@ def create_app(settings=None, driver_factory=BrowserDriver):
                 "concurrency": engine.concurrency, "max_concurrency": settings.max_concurrency,
                 "live_enabled": live_enabled,
                 "email_check_enabled": getattr(driver_factory, "email_verified", False),
-                "kyc_retry_enabled": getattr(driver_factory, "retry_verified", False)}
+                "account_check_enabled": True,
+                "saved_card_topup_enabled": settings.live_enabled and getattr(driver_factory, "saved_card_verified", False),
+                "refresh_enabled": True}
 
     @app.get("/api/address")
     async def address():
@@ -187,10 +189,27 @@ def create_app(settings=None, driver_factory=BrowserDriver):
     async def worker_action(job_id: str, action: str):
         if action == "check_email" and not getattr(driver_factory, "email_verified", False):
             raise HTTPException(409, "Pemeriksa email Anthropic belum diverifikasi")
-        if action == "retry_kyc" and not getattr(driver_factory, "retry_verified", False):
-            raise HTTPException(409, "Alur kirim ulang Persona belum diverifikasi")
+        current = app.state.engine.jobs.get(job_id)
+        if action == "refresh_session" and current and current.status == Status.attention:
+            try:
+                await app.state.engine.refresh_active(job_id)
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from None
+            except Exception:
+                raise HTTPException(409, "Halaman belum berhasil dimuat ulang; periksa browser worker") from None
+            return {"job_id": job_id}
         try:
             action_id = app.state.engine.enqueue_action(job_id, action)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"job_id": action_id}
+
+    @app.post("/api/jobs/{job_id}/topup", status_code=202)
+    async def saved_card_topup(job_id: str, body: SavedCardTopup):
+        if not settings.live_enabled or not getattr(driver_factory, "saved_card_verified", False):
+            raise HTTPException(409, "Checkout kartu tertaut belum diverifikasi")
+        try:
+            action_id = app.state.engine.enqueue_action(job_id, "check_topup", payment=body)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         return {"job_id": action_id}

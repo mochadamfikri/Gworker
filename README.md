@@ -7,8 +7,9 @@ Private admin panel for isolated browser workers. Rebuild of Gworker.
 The panel, account import, concurrency scheduler, authentication, ephemeral batch
 secrets, encrypted per-worker login sessions, interruption handling, and interactive
 browser control are implemented. Session cookies can be restored after restart.
-Email classification and Persona resend controls are gated until their live flows
-have been mapped and verified; neither runs automatically in the background.
+Email extraction and card checkout remain gated until their live flows have been
+mapped and verified. Retry refreshes only the selected worker page. Cek opens the
+Claude dashboard and can queue an explicitly authorized top-up on the linked card.
 **Live Claude onboarding and credit purchases are not ready for deployment.**
 The authenticated forms, checkout total, KYC/3DS detection, and reliable purchase
 confirmation still need to be mapped against an authorized test account. The
@@ -60,27 +61,34 @@ and cookie isolation. No real accounts, card details, or payments belong in CI.
    connect. Closing the view leaves automation paused; click **Lanjutkan** after
    finishing. The worker must verify the result rather than trusting that click.
 6. After a worker finishes, **Buka sesi** queues a browser using its saved login.
-   **Cek email** and **Retry KYC** are separate operations and never repeat payment.
-   These actions share the browser concurrency limit. Only one action may use a
-   given saved session at a time. Retry KYC requires the official Persona resend
-   flow to be mapped before it can be enabled.
+   **Retry** refreshes the selected worker page, or restores its encrypted saved
+   URL/session if closed. A page resulting from a POST is not automatically
+   resubmitted. Retry never initiates a payment or sends an email.
+   **Cek** opens a dialog for the USD amount and maximum final charge. It checks
+   `https://platform.claude.com/dashboard`, then uses the card already linked to
+   Claude if authenticated. No raw card or CVV is requested for this operation.
+   **Cek login saja** checks without authorizing a purchase. Logout means login is
+   required, not a proven suspension. Ambiguous pages request operator attention.
+   Operations share the browser concurrency limit and one session cannot run two
+   operations concurrently. Duplicate top-up request IDs do not submit twice.
 7. Raising concurrency launches queued workers. Lowering it allows current
    workers to finish before starting more. A failed payment is never auto-retried.
 
 ## Data and deployment
 
 SQLite stores job IDs, email addresses, statuses, fixed status messages,
-timestamps, submission IDs, and the billing address explicitly saved by the admin.
+timestamps, submission IDs, authorized top-up amounts/limits, and the billing
+address explicitly saved by the admin.
 Names, organization identity, account passwords, and card details are held in the active
 batch's memory, never in database records or logs. Remote frames exist in memory
 only, with no screenshot files, HAR, traces, or recordings. References are released
 after batch completion/cancellation; this is not a guarantee of secure RAM erasure.
 Restart marks unfinished jobs `interrupted`; payments are never replayed.
 
-Google/Claude cookies are saved in encrypted `.session` files with a separate
+Google/Claude/Persona authentication cookies and the last allowed-provider URL are saved in encrypted `.session` files with a separate
 Fernet key, directory mode 0700 and file mode 0600. They are checkpointed while
 a worker is active, before attention, and before closing. No payment-provider
-cookies, Persona state, localStorage, IndexedDB, email bodies, form values, or
+cookies, localStorage, IndexedDB, email bodies, form values, or
 passwords are saved. Missing/expired authentication may still require login again.
 Keep the original session directory and master key together in a protected backup;
 never commit either. Missing keys with existing sessions stop startup rather than
@@ -89,7 +97,7 @@ silently destroying recoverability. Login state is retained until explicitly rem
 Email results are separate from payment completion. No suspension email means only
 `no_suspend_detected` at the check time, not proof the account passed KYC or remains
 active. A previously detected suspension is not cleared by a later empty search.
-Email checks and resends execute only after the admin clicks the corresponding action.
+Email checks execute only on explicit request. Retry is a page refresh, not a resend.
 
 Use the dedicated service account in `deploy/antwork.service`, one Uvicorn process,
 HTTPS with an authenticated panel, a RAM-backed runtime directory, disabled core

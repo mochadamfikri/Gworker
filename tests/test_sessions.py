@@ -8,8 +8,8 @@ from uuid import uuid4
 import pytest
 
 from antwork.engine import Engine
-from antwork.models import BatchInput, Status
-from antwork.sessions import SessionVault
+from antwork.models import BatchInput, SavedCardTopup, Status
+from antwork.sessions import SessionVault, safe_resume_url
 from antwork.store import Store
 
 
@@ -58,6 +58,19 @@ def test_missing_key_and_empty_snapshot_do_not_destroy_saved_state(tmp_path):
     with pytest.raises(RuntimeError):
         SessionVault(tmp_path)
     assert vault.path(worker_id).exists()
+
+
+def test_resume_url_is_encrypted_and_provider_scoped(tmp_path):
+    vault = SessionVault(tmp_path)
+    worker_id = str(uuid4())
+    url = "https://inquiry.withpersona.com/verify?inquiry=private-example-token"
+    vault.save(worker_id,"one@example.com",auth_state(),resume_url=url)
+    assert b"private-example-token" not in vault.path(worker_id).read_bytes()
+    assert SessionVault(tmp_path).resume_url(worker_id,"one@example.com") == url
+    for bad in ["http://localhost/", "https://withpersona.com.evil.example/", "https://user:pass@withpersona.com/", "https://withpersona.com:8443/", "file:///etc/passwd", "https://bank.test/challenge"]:
+        assert safe_resume_url(bad) is None
+    vault.save(worker_id,"one@example.com",auth_state(),resume_url="https://unrelated.example/")
+    assert vault.resume_url(worker_id,"one@example.com") is None
 
 
 class Context:
@@ -139,4 +152,34 @@ async def test_session_actions_share_limit_and_cannot_overlap(tmp_path,payload):
     await until(lambda: engine.jobs[second].status == Status.attention)
     await engine.close()
     assert engine.jobs[first].result == "session_opened"
+    store.close()
+
+
+async def test_saved_card_topup_intent_is_idempotent_without_card_secrets(tmp_path,payload):
+    class PaymentDriver(Driver):
+        submitted = 0
+        async def maintain(self,job,saved,attention):
+            self.context = Context()
+            assert job.action == "check_topup"
+            assert job.amount_usd == "5.00" and job.limit_usd == "6.00"
+            PaymentDriver.submitted += 1
+            return "payment_confirmed"
+    store = Store(str(tmp_path / "db"))
+    engine = Engine(store,PaymentDriver,vault=SessionVault(tmp_path / "sessions"))
+    engine.start(BatchInput(**payload))
+    await until(lambda: engine.secrets is None)
+    source_id = next(iter(engine.jobs))
+    payment = SavedCardTopup(request_id=uuid4(),amount_usd="5.00",limit_usd="6.00")
+    first = engine.enqueue_action(source_id,"check_topup",payment)
+    assert engine.enqueue_action(source_id,"check_topup",payment) == first
+    await until(lambda: engine.runner.done())
+    assert PaymentDriver.submitted == 1
+    assert engine.jobs[first].result == "payment_confirmed"
+    assert engine.enqueue_action(source_id,"check_topup",payment) == first
+    assert PaymentDriver.submitted == 1
+    changed = payment.model_copy(update={"amount_usd":"7.00"})
+    with pytest.raises(ValueError):
+        engine.enqueue_action(source_id,"check_topup",changed)
+    assert engine.secrets is None
+    await engine.close()
     store.close()

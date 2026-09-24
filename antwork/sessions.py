@@ -1,7 +1,8 @@
 """Encrypted, per-worker authentication cookies; never browser form contents.
 
-Only Google and Claude authentication-domain cookies are retained. Payment,
-Persona, localStorage, IndexedDB, email bodies and autofill are not persisted.
+Only Google, Claude and Persona authentication-domain cookies are retained.
+Bank/payment-provider state, localStorage, IndexedDB, email bodies and autofill
+are not persisted. The current allowed-provider URL is encrypted for Retry.
 """
 import hashlib
 import json
@@ -9,12 +10,29 @@ import os
 from pathlib import Path
 import tempfile
 from uuid import UUID
+from urllib.parse import urlparse
 
 from cryptography.fernet import Fernet
 
 
 AUTH_DOMAINS = {"google.com", "accounts.google.com", "mail.google.com",
-                "claude.com", "platform.claude.com", "anthropic.com", "console.anthropic.com"}
+                "claude.com", "platform.claude.com", "anthropic.com", "console.anthropic.com",
+                "withpersona.com", "inquiry.withpersona.com", "perso.na"}
+
+
+def safe_resume_url(url):
+    if not isinstance(url, str) or len(url) > 8192 or any(ord(c) < 32 for c in url):
+        return None
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None,443):
+            return None
+        host = parsed.hostname or ""
+        if host in AUTH_DOMAINS or host.endswith(".withpersona.com"):
+            return url
+    except ValueError:
+        pass
+    return None
 
 
 class SessionVault:
@@ -45,7 +63,7 @@ class SessionVault:
     def binding(email):
         return hashlib.sha256(email.strip().lower().encode()).hexdigest()
 
-    def save(self, worker_id, email, state):
+    def save(self, worker_id, email, state, resume_url=None):
         # Explicit allowlist: do not serialize arbitrary browser state.
         cookies = []
         for cookie in state.get("cookies", []):
@@ -58,6 +76,7 @@ class SessionVault:
         data = self.cipher.encrypt(json.dumps({
             "version": 1, "worker_id": str(UUID(str(worker_id))), "account": self.binding(email),
             "state": {"cookies": cookies, "origins": []},
+            "resume_url": safe_resume_url(resume_url),
         }, separators=(",", ":")).encode())
         descriptor, temporary = tempfile.mkstemp(dir=self.directory, suffix=".tmp")
         try:
@@ -72,13 +91,21 @@ class SessionVault:
         return True
 
     def load(self, worker_id, email):
+        data = self._read(worker_id, email)
+        return data["state"] if data else None
+
+    def resume_url(self, worker_id, email):
+        data = self._read(worker_id, email)
+        return safe_resume_url(data.get("resume_url")) if data else None
+
+    def _read(self, worker_id, email):
         path = self.path(worker_id)
         if not path.exists():
             return None
         data = json.loads(self.cipher.decrypt(path.read_bytes()))
         if data.get("version") != 1 or data.get("worker_id") != str(UUID(str(worker_id))) or data.get("account") != self.binding(email):
             raise ValueError("Saved session does not belong to this worker")
-        return data["state"]
+        return data
 
     def exists(self, worker_id):
         return self.path(worker_id).exists()
